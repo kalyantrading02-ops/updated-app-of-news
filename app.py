@@ -163,7 +163,8 @@ news_tab, trending_tab, sentiment_tab = tabs
 # TAB 1: NEWS
 # ---------------------------
 with news_tab:
-    st.header("📰 Latest F&O News with Sentiment")
+    st.header("Latest Stock News")
+    # your news code
     if not selected:
         st.info("Select at least one stock from the sidebar.")
     else:
@@ -189,7 +190,8 @@ with news_tab:
 
 # ---------------- Trending Stocks Tab ----------------
 with tab2:
-    st.header("📊 Trending Stocks (Most Mentioned)")
+    sst.header("Trending Stocks")
+    # your trending code
     st.caption("Automatically analyses most-mentioned NSE/BSE F&O stocks in news")
 
     time_range = st.selectbox(
@@ -231,7 +233,8 @@ with tab2:
 # TAB 3: SENTIMENT OVERVIEW
 # ---------------------------
 with sentiment_tab:
-    st.header("📈 Sentiment Overview")
+    st.header("Market Sentiment Analysis")
+    # your sentiment code
     df_sent = build_news_df(selected, since_date)
     if df_sent.empty:
         st.warning("No sentiment data available.")
