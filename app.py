@@ -204,18 +204,38 @@ with trending_tab:
 # ---------------------------
 # TAB 3: SENTIMENT OVERVIEW
 # ---------------------------
+# ---------------------------
+# TAB 3: SENTIMENT OVERVIEW
+# ---------------------------
 with sentiment_tab:
     st.header("📈 Sentiment Overview")
     df_sent = build_news_df(selected, since_date)
+
     if df_sent.empty:
         st.warning("No sentiment data available.")
     else:
         df_sent["Date"] = df_sent["Published"].dt.date
         daily = df_sent.groupby(["Date", "Sentiment"]).size().unstack(fill_value=0).reset_index()
-        # Ensure all sentiment columns exist
-for col in ["Positive", "Neutral", "Negative"]:
-    if col not in daily.columns:
-        daily[col] = 0
+
+        # ✅ Ensure all sentiment columns exist
+        for col in ["Positive", "Neutral", "Negative"]:
+            if col not in daily.columns:
+                daily[col] = 0
+
+        # ✅ Line chart for trend
+        fig2 = px.line(
+            daily,
+            x="Date",
+            y=["Positive", "Neutral", "Negative"],
+            title="Daily Sentiment Trend"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # ✅ Distribution table
+        st.subheader("Sentiment Distribution")
+        dist = df_sent["Sentiment"].value_counts().reset_index()
+        dist.columns = ["Sentiment", "Count"]
+        st.dataframe(dist)
 
 # Now safely plot
 fig2 = px.line(
