@@ -71,12 +71,20 @@ def fetch_news(query):
     return articles
 
 # ----------------- AUTO REFRESH -----------------
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
+
+st.title("📰 F&O News Dashboard")
+
+# Sidebar refresh control
 refresh_rate = st.sidebar.slider("⏱️ Auto-refresh every (minutes)", 0, 60, 0)
+
+# Run auto-refresh if refresh_rate > 0
 if refresh_rate > 0:
-    st.sidebar.info(f"App will auto-refresh every {refresh_rate} minute(s).")
-    st_autorefresh = st.experimental_rerun  # auto rerun alias
-    time.sleep(refresh_rate * 60)
-    st.experimental_rerun()
+    count = st_autorefresh(interval=refresh_rate * 60 * 1000, key="fno_refresh")
+    st.sidebar.write(f"🔁 Auto-refreshed {count} times.")
+else:
+    st.sidebar.write("⚡ Auto-refresh is turned off.")
 
 # ----------------- FETCH BUTTON -----------------
 if st.button("🔍 Fetch Latest News"):
