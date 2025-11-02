@@ -1,0 +1,5 @@
+streamlit
+feedparser
+pandas
+python-dateutil
+from streamlit_autorefresh import st_autorefresh
