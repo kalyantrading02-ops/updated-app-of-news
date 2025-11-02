@@ -200,10 +200,7 @@ with trending_tab:
         count_df.columns = ["Stock", "Mentions"]
         fig = px.bar(count_df, x="Stock", y="Mentions", color="Stock", title="Most Mentioned Stocks in News")
         st.plotly_chart(fig, use_container_width=True)
-
-# ---------------------------
-# TAB 3: SENTIMENT OVERVIEW
-# ---------------------------
+        
 # ---------------------------
 # TAB 3: SENTIMENT OVERVIEW
 # ---------------------------
