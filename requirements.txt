@@ -1,5 +1,4 @@
 streamlit
-feedparser
-textblob
+GoogleNews
 pandas
-plotly
+emoji
