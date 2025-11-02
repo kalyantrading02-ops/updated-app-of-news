@@ -187,19 +187,45 @@ with news_tab:
             csv = df.to_csv(index=False).encode("utf-8")
             st.download_button("💾 Download CSV", data=csv, file_name="fno_news_sentiment.csv", mime="text/csv")
 
-# ---------------------------
-# TAB 2: TRENDING
-# ---------------------------
-with trending_tab:
+# ---------------- Trending Stocks Tab ----------------
+with tab2:
     st.header("📊 Trending Stocks (Most Mentioned)")
-    df_trend = build_news_df(selected, since_date)
-    if df_trend.empty:
-        st.warning("No data available for trending analysis.")
-    else:
-        count_df = df_trend["Stock"].value_counts().reset_index()
-        count_df.columns = ["Stock", "Mentions"]
-        fig = px.bar(count_df, x="Stock", y="Mentions", color="Stock", title="Most Mentioned Stocks in News")
-        st.plotly_chart(fig, use_container_width=True)
+    st.caption("Automatically analyses most-mentioned NSE/BSE F&O stocks in news")
+
+    time_range = st.selectbox(
+        "🕒 Select Time Range",
+        ["1 Week", "1 Month", "3 Months", "6 Months"]
+    )
+
+    # Define F&O stocks (short list for demo; you can expand this)
+    fno_stocks = [
+        "Reliance Industries", "HDFC Bank", "Infosys", "ICICI Bank", "TCS",
+        "State Bank of India", "Larsen & Toubro", "Axis Bank", "Bharti Airtel",
+        "Maruti Suzuki", "ITC", "Kotak Mahindra Bank", "Wipro", "HCL Technologies",
+        "Tata Motors", "NTPC", "Adani Enterprises", "Hindustan Unilever"
+    ]
+
+    since_date = get_since_date(time_range)
+    st.write(f"Fetching news since **{since_date.strftime('%d %b %Y')}**...")
+
+    all_news = []
+    progress = st.progress(0)
+    for i, s in enumerate(fno_stocks):
+        feed = fetch_news_for_stock(s)
+        for e in feed.entries[:5]:  # limit to top 5 per stock
+            all_news.append({"Stock": s, "Title": e.title})
+        progress.progress((i + 1) / len(fno_stocks))
+
+    # Count mentions
+    df_trend = pd.DataFrame(all_news)
+    trend = df_trend["Stock"].value_counts().reset_index()
+    trend.columns = ["Stock", "Mentions"]
+
+    st.subheader("Top 10 Most Mentioned Stocks")
+    st.bar_chart(trend.set_index("Stock").head(10))
+
+    with st.expander("View Full Mention List"):
+        st.dataframe(trend)
 
 # ---------------------------
 # TAB 3: SENTIMENT OVERVIEW
