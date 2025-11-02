@@ -150,7 +150,7 @@ def build_news_df(stocks, since_date):
     """Fetch and prepare news dataframe with sentiment"""
     all_rows = []
     for s in stocks:
-        def fetch_news(stock_name):
+        feed = fetch_news(s)
         for e in feed.entries:
             try:
                 if "published_parsed" not in e:
