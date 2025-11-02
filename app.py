@@ -156,7 +156,7 @@ def build_news_df(stocks, since_date):
 # ---------------------------
 # Tabs
 # ---------------------------
-tabs = st.tabs(["📰 News", "📊 Trending", "📈 Sentiment Overview"])
+tab1, tab2, tab3 = st.tabs(["📰 News Feed", "📊 Trending Stocks", "💬 Sentiment Analysis"])
 news_tab, trending_tab, sentiment_tab = tabs
 
 # ---------------------------
