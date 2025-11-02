@@ -248,7 +248,7 @@ with sentiment_tab:
         st.plotly_chart(fig2, use_container_width=True)
 
         # Sentiment distribution table
-        for _, r in df.iterrows():
+for _, r in df.iterrows():
     emoji = r.get("Emoji", "⚪")
     stock = r.get("Stock", "Unknown")
     sentiment = r.get("Sentiment", "Neutral")
