@@ -214,12 +214,12 @@ with sentiment_tab:
         df_sent["Date"] = df_sent["Published"].dt.date
         daily = df_sent.groupby(["Date", "Sentiment"]).size().unstack(fill_value=0).reset_index()
 
-        # ✅ Ensure all sentiment columns exist
+        # Ensure all sentiment columns exist
         for col in ["Positive", "Neutral", "Negative"]:
             if col not in daily.columns:
                 daily[col] = 0
 
-        # ✅ Line chart for trend
+        # Line chart for sentiment trend
         fig2 = px.line(
             daily,
             x="Date",
@@ -228,25 +228,8 @@ with sentiment_tab:
         )
         st.plotly_chart(fig2, use_container_width=True)
 
-        # ✅ Distribution table
+        # Sentiment distribution table
         st.subheader("Sentiment Distribution")
         dist = df_sent["Sentiment"].value_counts().reset_index()
         dist.columns = ["Sentiment", "Count"]
         st.dataframe(dist)
-
-# Now safely plot
-fig2 = px.line(
-    daily,
-    x="Date",
-    y=["Positive", "Neutral", "Negative"],
-    title="Daily Sentiment Trend"
-)
-st.plotly_chart(fig2, use_container_width=True)
-
-        st.subheader("Sentiment Distribution")
-        dist = df_sent["Sentiment"].value_counts().reset_index()
-        dist.columns = ["Sentiment", "Count"]
-        st.dataframe(dist)
-
-st.markdown("---")
-st.caption("Built with Streamlit • News via Google RSS • Sentiment via TextBlob • Live data from Yahoo Finance")
