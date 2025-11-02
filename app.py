@@ -101,25 +101,19 @@ fetch_now = st.sidebar.button("🔄 Fetch News Now")
 # Helper Functions
 # ---------------------------
 def fetch_news(stock_name):
-    """
-    Fetch only investor-relevant news from Google News RSS for a given stock.
-    """
-    import urllib.parse
+    import urllib.parse, feedparser
+
     query = f"{stock_name} stock india " + " OR ".join(INVESTOR_KEYWORDS)
     url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
-    
-    feed = feedparser.parse(url)
-    news_list = []
-    for entry in feed.entries:
-        title = entry.title
-        link = entry.link
-        published = entry.published if "published" in entry else "N/A"
-        news_list.append({
-            "title": title,
-            "link": link,
-            "published": published
-        })
-    return news_list
+
+    try:
+        feed = feedparser.parse(url)
+        if not hasattr(feed, "entries") or not feed.entries:
+            return []  # return empty list if nothing fetched
+        return feed.entries
+    except Exception as e:
+        print(f"Error fetching news for {stock_name}: {e}")
+        return []
 
 @st.cache_data(ttl=300)
 def get_live_price(ticker):
