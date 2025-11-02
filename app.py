@@ -9,27 +9,6 @@ import plotly.express as px
 from textblob import TextBlob
 from streamlit_autorefresh import st_autorefresh
 
-def sentiment_to_emoji(sentiment):
-    if sentiment.lower() == "positive":
-        return "🟢"
-    elif sentiment.lower() == "neutral":
-        return "🟡"
-    elif sentiment.lower() == "negative":
-        return "🔴"
-    else:
-        return "⚪"
-
-INVESTOR_KEYWORDS = [
-    "shareholding pattern", "promoter holding", "stake sale", "stake buy",
-    "management change", "CEO appointment", "board meeting", "corporate action",
-    "dividend", "bonus issue", "split", "buyback", "merger", "acquisition",
-    "order win", "project", "capacity expansion", "capex", "new plant",
-    "credit rating", "audit report", "ICRA", "CRISIL", "CARE Ratings",
-    "insider trading", "bulk deal", "block deal",
-    "sector update", "macro update", "industry outlook",
-    "neutral", "informative", "press release"
-]
-
 # ---------------------------
 # Page Config
 # ---------------------------
@@ -110,20 +89,12 @@ fetch_now = st.sidebar.button("🔄 Fetch News Now")
 # ---------------------------
 # Helper Functions
 # ---------------------------
-def fetch_news(stock_name):
-    import urllib.parse, feedparser
-
-    query = f"{stock_name} stock india " + " OR ".join(INVESTOR_KEYWORDS)
-    url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
-
-    try:
-        feed = feedparser.parse(url)
-        if not hasattr(feed, "entries") or not feed.entries:
-            return []  # return empty list if nothing fetched
-        return feed.entries
-    except Exception as e:
-        print(f"Error fetching news for {stock_name}: {e}")
-        return []
+@st.cache_data(ttl=300)
+def fetch_news_for_stock(stock):
+    """Fetch Google News RSS feed for given stock"""
+    safe_q = quote(f"{stock} stock India")
+    url = f"https://news.google.com/rss/search?q={safe_q}&hl=en-IN&gl=IN&ceid=IN:en"
+    return feedparser.parse(url)
 
 @st.cache_data(ttl=300)
 def get_live_price(ticker):
@@ -151,25 +122,35 @@ def get_sentiment(text):
         return "Neutral", "🟡"
 
 def build_news_df(stocks, since_date):
-    rows = []
+    """Fetch and prepare news dataframe with sentiment"""
+    all_rows = []
     for s in stocks:
-        entries = fetch_news(s)
-        if not entries:
-            continue
-        for e in entries:
-            title = e.title
-            link = e.link
-            published = e.published if "published" in e else None
-            rows.append({
-                "Stock": s,
-                "Title": title,
-                "Link": link,
-                "Published": published
-            })
-    df = pd.DataFrame(rows)
+        feed = fetch_news_for_stock(s)
+        for e in feed.entries:
+            try:
+                if "published_parsed" not in e:
+                    continue
+                pub = datetime(*e.published_parsed[:6])
+                if pub < since_date:
+                    continue
+                title = e.title
+                link = e.link
+                source = getattr(e, "source", "Google News")
+                sentiment, emoji = get_sentiment(title)
+                all_rows.append({
+                    "Stock": s,
+                    "Title": title,
+                    "Sentiment": sentiment,
+                    "Emoji": emoji,
+                    "Source": source,
+                    "Published": pub,
+                    "Link": link
+                })
+            except Exception:
+                continue
+    df = pd.DataFrame(all_rows)
     if not df.empty:
-        df["Published"] = pd.to_datetime(df["Published"], errors="coerce")
-        df = df[df["Published"] >= since_date]
+        df = df.sort_values(by="Published", ascending=False).reset_index(drop=True)
     return df
 
 # ---------------------------
@@ -219,43 +200,25 @@ with trending_tab:
         count_df.columns = ["Stock", "Mentions"]
         fig = px.bar(count_df, x="Stock", y="Mentions", color="Stock", title="Most Mentioned Stocks in News")
         st.plotly_chart(fig, use_container_width=True)
-        
+
 # ---------------------------
 # TAB 3: SENTIMENT OVERVIEW
 # ---------------------------
 with sentiment_tab:
     st.header("📈 Sentiment Overview")
     df_sent = build_news_df(selected, since_date)
-
     if df_sent.empty:
         st.warning("No sentiment data available.")
     else:
         df_sent["Date"] = df_sent["Published"].dt.date
         daily = df_sent.groupby(["Date", "Sentiment"]).size().unstack(fill_value=0).reset_index()
-
-        # Ensure all sentiment columns exist
-        for col in ["Positive", "Neutral", "Negative"]:
-            if col not in daily.columns:
-                daily[col] = 0
-
-        # Line chart for sentiment trend
-        fig2 = px.line(
-            daily,
-            x="Date",
-            y=["Positive", "Neutral", "Negative"],
-            title="Daily Sentiment Trend"
-        )
+        fig2 = px.line(daily, x="Date", y=["Positive", "Neutral", "Negative"], title="Daily Sentiment Trend")
         st.plotly_chart(fig2, use_container_width=True)
 
-        # Sentiment distribution table
-for _, r in df.iterrows():
-    emoji = r.get("Emoji", "⚪")
-    stock = r.get("Stock", "Unknown")
-    sentiment = r.get("Sentiment", "Neutral")
-    title = r.get("Title", "No Title")
-    link = r.get("Link", "#")
+        st.subheader("Sentiment Distribution")
+        dist = df_sent["Sentiment"].value_counts().reset_index()
+        dist.columns = ["Sentiment", "Count"]
+        st.dataframe(dist)
 
-    st.markdown(
-        f"**{emoji} {stock}** — {sentiment}  \n"
-        f"[{title}]({link})"
-    )
+st.markdown("---")
+st.caption("Built with Streamlit • News via Google RSS • Sentiment via TextBlob • Live data from Yahoo Finance")
