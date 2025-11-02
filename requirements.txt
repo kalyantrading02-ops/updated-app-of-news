@@ -3,5 +3,5 @@ feedparser
 pandas
 yfinance
 plotly
-nltk
+textblob
 streamlit-autorefresh
