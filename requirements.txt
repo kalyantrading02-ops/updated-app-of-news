@@ -1,4 +1,5 @@
 streamlit
-GoogleNews
+gnews
 pandas
+plotly
 emoji
