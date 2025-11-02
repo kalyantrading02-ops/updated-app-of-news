@@ -1,8 +1,5 @@
 streamlit
 feedparser
-pandas
-yfinance
-plotly
 textblob
-streamlit-autorefresh
-
+pandas
+plotly
