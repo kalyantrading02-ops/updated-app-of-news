@@ -9,6 +9,17 @@ import plotly.express as px
 from textblob import TextBlob
 from streamlit_autorefresh import st_autorefresh
 
+INVESTOR_KEYWORDS = [
+    "shareholding pattern", "promoter holding", "stake sale", "stake buy",
+    "management change", "CEO appointment", "board meeting", "corporate action",
+    "dividend", "bonus issue", "split", "buyback", "merger", "acquisition",
+    "order win", "project", "capacity expansion", "capex", "new plant",
+    "credit rating", "audit report", "ICRA", "CRISIL", "CARE Ratings",
+    "insider trading", "bulk deal", "block deal",
+    "sector update", "macro update", "industry outlook",
+    "neutral", "informative", "press release"
+]
+
 # ---------------------------
 # Page Config
 # ---------------------------
@@ -89,12 +100,26 @@ fetch_now = st.sidebar.button("🔄 Fetch News Now")
 # ---------------------------
 # Helper Functions
 # ---------------------------
-@st.cache_data(ttl=300)
-def fetch_news_for_stock(stock):
-    """Fetch Google News RSS feed for given stock"""
-    safe_q = quote(f"{stock} stock India")
-    url = f"https://news.google.com/rss/search?q={safe_q}&hl=en-IN&gl=IN&ceid=IN:en"
-    return feedparser.parse(url)
+def fetch_news(stock_name):
+    """
+    Fetch only investor-relevant news from Google News RSS for a given stock.
+    """
+    import urllib.parse
+    query = f"{stock_name} stock india " + " OR ".join(INVESTOR_KEYWORDS)
+    url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=en-IN&gl=IN&ceid=IN:en"
+    
+    feed = feedparser.parse(url)
+    news_list = []
+    for entry in feed.entries:
+        title = entry.title
+        link = entry.link
+        published = entry.published if "published" in entry else "N/A"
+        news_list.append({
+            "title": title,
+            "link": link,
+            "published": published
+        })
+    return news_list
 
 @st.cache_data(ttl=300)
 def get_live_price(ticker):
