@@ -1,4 +1,7 @@
-feedparser
 streamlit
-streamlit-autorefresh
+feedparser
 pandas
+yfinance
+plotly
+nltk
+streamlit-autorefresh
