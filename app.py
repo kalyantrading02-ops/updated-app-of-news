@@ -1,124 +1,129 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from GoogleNews import GoogleNews
-import emoji
+from gnews import GNews
+import random
 
 # ---------------------------------
 # App Title
 # ---------------------------------
-st.set_page_config(page_title="Stock News & Sentiment App", layout="wide")
+st.set_page_config(page_title="Stock News & Sentiment Dashboard", layout="wide")
 st.title("📰 Stock Market News Dashboard")
 
 # ---------------------------------
-# Sidebar: Filters
+# Sidebar: Time Range Selector
 # ---------------------------------
 st.sidebar.header("Filter Options")
-
 time_period = st.sidebar.selectbox(
     "Select Time Period",
     ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"]
 )
 
-fo_stocks = [
-    "Reliance Industries", "TCS", "Infosys", "HDFC Bank", "ICICI Bank",
-    "State Bank of India", "HCL Technologies", "Wipro", "Larsen & Toubro",
-    "Tata Motors", "Bajaj Finance", "Axis Bank", "NTPC", "ITC", "Adani Enterprises",
-    "Coal India", "Power Grid", "Maruti Suzuki", "Tech Mahindra", "Sun Pharma"
-]
-
-selected_stocks = st.sidebar.multiselect("Select Stocks", fo_stocks, default=["Reliance Industries"])
-
 # ---------------------------------
-# Convert time filter to date range
+# Date Range Logic
 # ---------------------------------
 today = datetime.today()
-
 if time_period == "Last Week":
     start_date = today - timedelta(days=7)
 elif time_period == "Last Month":
     start_date = today - timedelta(days=30)
 elif time_period == "Last 3 Months":
     start_date = today - timedelta(days=90)
-elif time_period == "Last 6 Months":
+else:
     start_date = today - timedelta(days=180)
 
 # ---------------------------------
-# Helper Function: Fetch News
+# List of F&O Stocks (NSE)
 # ---------------------------------
-def fetch_news(stock, start, end):
-    googlenews = GoogleNews(start=start.strftime("%m/%d/%Y"), end=end.strftime("%m/%d/%Y"))
-    googlenews.search(stock)
-    result = googlenews.result(sort=True)
-    news_items = []
+fo_stocks = [
+    "Reliance Industries", "TCS", "Infosys", "HDFC Bank", "ICICI Bank",
+    "State Bank of India", "HCL Technologies", "Wipro", "Larsen & Toubro",
+    "Tata Motors", "Bajaj Finance", "Axis Bank", "NTPC", "ITC",
+    "Adani Enterprises", "Coal India", "Power Grid", "Maruti Suzuki",
+    "Tech Mahindra", "Sun Pharma"
+]
 
-    for item in result:
-        news_items.append({
-            "Stock": stock,
-            "Title": item.get("title", ""),
-            "Media": item.get("media", ""),
-            "Date": item.get("date", ""),
-            "Link": item.get("link", "")
-        })
-    return news_items
+# ---------------------------------
+# Helper Function to Fetch News
+# ---------------------------------
+def fetch_news_count(stock, start, end):
+    try:
+        googlenews = GNews(language='en', country='IN', start_date=start, end_date=end)
+        news = googlenews.get_news(stock)
+        return len(news)
+    except Exception:
+        return 0
 
 # ---------------------------------
 # Tabs Setup
 # ---------------------------------
-tabs = st.tabs(["📰 News", "🔥 Trending Stocks", "💬 Sentiment"])
-news_tab, trending_tab, sentiment_tab = tabs
+news_tab, trending_tab, sentiment_tab = st.tabs(["📰 News", "🔥 Trending Stocks", "💬 Sentiment"])
 
 # ---------------------------------
 # Tab 1: News
 # ---------------------------------
 with news_tab:
-    st.header("🗞️ Latest Stock News")
+    st.header("🗞️ Latest News for Top Stocks")
+
+    gnews = GNews(language='en', country='IN', start_date=start_date, end_date=today)
     all_news = []
 
-    for stock in selected_stocks:
+    for stock in fo_stocks[:5]:  # Show top 5 for speed
         st.subheader(f"🔹 {stock}")
-        news_data = fetch_news(stock, start_date, today)
-        if news_data:
-            df = pd.DataFrame(news_data)
-            st.dataframe(df[["Title", "Media", "Date", "Link"]])
-            all_news.extend(news_data)
+        articles = gnews.get_news(stock)
+        if articles:
+            for art in articles[:5]:
+                st.markdown(f"**[{art['title']}]({art['url']})** — *{art['publisher']['title']}*")
+            all_news.extend(articles)
         else:
-            st.warning(f"No news found for {stock} in selected time range.")
+            st.warning(f"No news found for {stock} in selected range.")
 
 # ---------------------------------
-# Tab 2: Trending Stocks
+# Tab 2: Trending Stocks (Colored Bar Chart)
 # ---------------------------------
 with trending_tab:
-    st.header("🔥 Trending Stocks")
-    if len(selected_stocks) > 1:
-        trending_df = pd.DataFrame({"Stock": selected_stocks})
-        trending_df["News Count"] = [len(fetch_news(stock, start_date, today)) for stock in selected_stocks]
-        trending_df = trending_df.sort_values(by="News Count", ascending=False)
-        st.bar_chart(trending_df.set_index("Stock"))
-    else:
-        st.info("Select at least two stocks to compare trends.")
+    st.header("🔥 Trending Stocks Based on News Coverage")
+
+    progress = st.progress(0)
+    news_counts = []
+
+    for i, stock in enumerate(fo_stocks):
+        count = fetch_news_count(stock, start_date, today)
+        news_counts.append({"Stock": stock, "News Count": count})
+        progress.progress((i + 1) / len(fo_stocks))
+
+    trending_df = pd.DataFrame(news_counts)
+    trending_df = trending_df.sort_values(by="News Count", ascending=False)
+
+    # Use Plotly for colored bars
+    import plotly.express as px
+    fig = px.bar(
+        trending_df,
+        x="Stock",
+        y="News Count",
+        color="News Count",
+        color_continuous_scale="Bluered",
+        title=f"Trending Stocks ({time_period})",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------------
-# Tab 3: Sentiment Analysis (Simple Demo)
+# Tab 3: Sentiment Analysis (Demo)
 # ---------------------------------
 with sentiment_tab:
-    st.header("💬 Sentiment Analysis")
+    st.header("💬 Sentiment Analysis (Demo)")
 
-    if len(selected_stocks) > 0:
-        sentiment_results = []
-        for stock in selected_stocks:
-            # Dummy sentiment example (you can plug in a real NLP model)
-            sentiment = "Positive" if len(stock) % 2 == 0 else "Neutral"
-            emoji_icon = "🟢" if sentiment == "Positive" else "🟡"
-            sentiment_results.append({"Stock": stock, "Sentiment": sentiment, "Emoji": emoji_icon})
+    sample_data = []
+    for stock in trending_df.head(10)["Stock"]:
+        sentiment = random.choice(["Positive", "Neutral", "Negative"])
+        emoji_icon = {"Positive": "🟢", "Neutral": "🟡", "Negative": "🔴"}[sentiment]
+        sample_data.append({"Stock": stock, "Sentiment": sentiment, "Emoji": emoji_icon})
 
-        sentiment_df = pd.DataFrame(sentiment_results)
-        st.dataframe(sentiment_df)
-    else:
-        st.warning("Please select stocks to analyze sentiment.")
+    sentiment_df = pd.DataFrame(sample_data)
+    st.dataframe(sentiment_df)
 
 # ---------------------------------
 # Footer
 # ---------------------------------
 st.markdown("---")
-st.caption("📊 Data sourced from Google News | Built with ❤️ using Streamlit")
+st.caption("📊 Data from Google News | Built with ❤️ using Streamlit and Plotly")
