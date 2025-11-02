@@ -1,5 +1,4 @@
-streamlit
 feedparser
+streamlit
+streamlit-autorefresh
 pandas
-python-dateutil
-from streamlit_autorefresh import st_autorefresh
