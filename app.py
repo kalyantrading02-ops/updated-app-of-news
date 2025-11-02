@@ -9,6 +9,16 @@ import plotly.express as px
 from textblob import TextBlob
 from streamlit_autorefresh import st_autorefresh
 
+def sentiment_to_emoji(sentiment):
+    if sentiment.lower() == "positive":
+        return "🟢"
+    elif sentiment.lower() == "neutral":
+        return "🟡"
+    elif sentiment.lower() == "negative":
+        return "🔴"
+    else:
+        return "⚪"
+
 INVESTOR_KEYWORDS = [
     "shareholding pattern", "promoter holding", "stake sale", "stake buy",
     "management change", "CEO appointment", "board meeting", "corporate action",
@@ -239,6 +249,6 @@ with sentiment_tab:
 
         # Sentiment distribution table
         st.subheader("Sentiment Distribution")
-        dist = df_sent["Sentiment"].value_counts().reset_index()
+        df["Emoji"] = df["Sentiment"].apply(sentiment_to_emoji)
         dist.columns = ["Sentiment", "Count"]
         st.dataframe(dist)
