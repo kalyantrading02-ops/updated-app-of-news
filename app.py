@@ -37,14 +37,17 @@ since_date = datetime.now() - timedelta(days=period_days[period])
 # -----------------------------
 # Helper Functions
 # -----------------------------
+import urllib.parse
+
 def fetch_news_for_stock(stock):
-    """Fetch Google News for a specific stock."""
+    """Fetch Google News for a specific stock (encoded URL-safe)."""
     search_terms = (
-        f"{stock} shareholding pattern OR management OR corporate actions "
-        f"OR order wins OR capacity expansion OR new projects "
-        f"OR credit rating OR audit report OR insider deals OR bulk deals"
+        f"{stock} shareholding pattern OR management OR corporate actions OR order wins "
+        f"OR capacity expansion OR new projects OR credit rating OR audit report "
+        f"OR insider deals OR bulk deals"
     )
-    feed_url = f"https://news.google.com/rss/search?q={search_terms}+when:6m&hl=en-IN&gl=IN&ceid=IN:en"
+    encoded_query = urllib.parse.quote_plus(search_terms)  # <-- Safe encoding
+    feed_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-IN&gl=IN&ceid=IN:en"
     return feedparser.parse(feed_url)
 
 def get_sentiment(text):
