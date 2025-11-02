@@ -141,35 +141,25 @@ def get_sentiment(text):
         return "Neutral", "🟡"
 
 def build_news_df(stocks, since_date):
-    """Fetch and prepare news dataframe with sentiment"""
-    all_rows = []
+    rows = []
     for s in stocks:
-        feed = fetch_news(s)
-        for e in feed.entries:
-            try:
-                if "published_parsed" not in e:
-                    continue
-                pub = datetime(*e.published_parsed[:6])
-                if pub < since_date:
-                    continue
-                title = e.title
-                link = e.link
-                source = getattr(e, "source", "Google News")
-                sentiment, emoji = get_sentiment(title)
-                all_rows.append({
-                    "Stock": s,
-                    "Title": title,
-                    "Sentiment": sentiment,
-                    "Emoji": emoji,
-                    "Source": source,
-                    "Published": pub,
-                    "Link": link
-                })
-            except Exception:
-                continue
-    df = pd.DataFrame(all_rows)
+        entries = fetch_news(s)
+        if not entries:
+            continue
+        for e in entries:
+            title = e.title
+            link = e.link
+            published = e.published if "published" in e else None
+            rows.append({
+                "Stock": s,
+                "Title": title,
+                "Link": link,
+                "Published": published
+            })
+    df = pd.DataFrame(rows)
     if not df.empty:
-        df = df.sort_values(by="Published", ascending=False).reset_index(drop=True)
+        df["Published"] = pd.to_datetime(df["Published"], errors="coerce")
+        df = df[df["Published"] >= since_date]
     return df
 
 # ---------------------------
