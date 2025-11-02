@@ -1,224 +1,195 @@
-# app.py - F&O News + Sentiment Dashboard
 import streamlit as st
 import feedparser
-import pandas as pd
-from datetime import datetime, timedelta
-from urllib.parse import quote
-import yfinance as yf
-import plotly.express as px
 from textblob import TextBlob
-from streamlit_autorefresh import st_autorefresh
+import pandas as pd
+import plotly.express as px
+from datetime import datetime, timedelta
+import re
 
-# ---------------------------
-# Page Config
-# ---------------------------
-st.set_page_config(page_title="F&O News + Sentiment Dashboard", layout="wide", page_icon="📰")
+# -----------------------------
+# Streamlit Page Config
+# -----------------------------
+st.set_page_config(page_title="F&O Stock News Dashboard", layout="wide")
+st.title("📊 F&O Stocks News & Sentiment Dashboard")
 
-# ---------------------------
-# F&O Stock List
-# ---------------------------
-FNO_MAP = {
-    "RELIANCE": "RELIANCE.NS",
-    "TCS": "TCS.NS",
-    "INFY": "INFY.NS",
-    "HDFCBANK": "HDFCBANK.NS",
-    "ICICIBANK": "ICICIBANK.NS",
-    "SBIN": "SBIN.NS",
-    "AXISBANK": "AXISBANK.NS",
-    "KOTAKBANK": "KOTAKBANK.NS",
-    "LT": "LT.NS",
-    "ITC": "ITC.NS",
-    "HINDUNILVR": "HINDUNILVR.NS",
-    "HCLTECH": "HCLTECH.NS",
-    "TECHM": "TECHM.NS",
-    "WIPRO": "WIPRO.NS",
-    "ADANIENT": "ADANIENT.NS",
-    "ADANIPORTS": "ADANIPORTS.NS",
-    "BHARTIARTL": "BHARTIARTL.NS",
-    "ULTRACEMCO": "ULTRACEMCO.NS",
-    "BAJFINANCE": "BAJFINANCE.NS",
-    "BAJAJFINSV": "BAJAJFINSV.NS",
-    "TATAMOTORS": "TATAMOTORS.NS",
-    "TATASTEEL": "TATASTEEL.NS",
-    "ONGC": "ONGC.NS",
-    "COALINDIA": "COALINDIA.NS",
-    "POWERGRID": "POWERGRID.NS",
-    "NTPC": "NTPC.NS",
-    "ASIANPAINT": "ASIANPAINT.NS",
-    "MARUTI": "MARUTI.NS",
-    "HEROMOTOCO": "HEROMOTOCO.NS",
-    "EICHERMOT": "EICHERMOT.NS",
-    "BPCL": "BPCL.NS",
-    "IOC": "IOC.NS",
-    "HDFCLIFE": "HDFCLIFE.NS",
-    "INDUSINDBK": "INDUSINDBK.NS",
-    "DIVISLAB": "DIVISLAB.NS",
-    "SUNPHARMA": "SUNPHARMA.NS"
+# -----------------------------
+# Sidebar Options
+# -----------------------------
+st.sidebar.header("📰 News Filters")
+period = st.sidebar.selectbox(
+    "Select Time Period",
+    ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"]
+)
+
+refresh_rate = st.sidebar.slider("⏱️ Auto-refresh every (minutes)", 0, 60, 0)
+
+if refresh_rate > 0:
+    st.experimental_rerun()
+
+period_days = {
+    "Last Week": 7,
+    "Last Month": 30,
+    "Last 3 Months": 90,
+    "Last 6 Months": 180,
 }
+since_date = datetime.now() - timedelta(days=period_days[period])
 
-ALL_STOCKS = list(FNO_MAP.keys())
-
-# ---------------------------
-# Sidebar
-# ---------------------------
-st.sidebar.title("⚙️ Controls")
-
-period = st.sidebar.selectbox("🗓 Time Range", ["Last 1 Week", "Last 1 Month", "Last 3 Months", "Last 6 Months"])
-days_map = {"Last 1 Week": 7, "Last 1 Month": 30, "Last 3 Months": 90, "Last 6 Months": 180}
-since_date = datetime.now() - timedelta(days=days_map[period])
-st.sidebar.write(f"📅 Showing news since: {since_date.strftime('%d %b %Y')}")
-
-selected = st.sidebar.multiselect("Select Stocks (multi-select)", ALL_STOCKS, default=["RELIANCE", "TCS", "INFY"])
-
-refresh_minutes = st.sidebar.number_input("Auto-refresh every (minutes, 0 = off)", min_value=0, max_value=60, value=0, step=1)
-if refresh_minutes and refresh_minutes > 0:
-    count = st_autorefresh(interval=refresh_minutes * 60 * 1000, key="autorefresh")
-    st.sidebar.caption(f"Auto-refreshed {count} times")
-
-dark_mode = st.sidebar.checkbox("🌙 Dark mode", value=False)
-if dark_mode:
-    st.markdown("""
-        <style>
-        .stApp { background-color: #0e1117; color: #e6edf3; }
-        .stDataFrame { color: #e6edf3; }
-        </style>
-    """, unsafe_allow_html=True)
-
-fetch_now = st.sidebar.button("🔄 Fetch News Now")
-
-# ---------------------------
+# -----------------------------
 # Helper Functions
-# ---------------------------
-@st.cache_data(ttl=300)
+# -----------------------------
 def fetch_news_for_stock(stock):
-    """Fetch Google News RSS feed for given stock"""
-    safe_q = quote(f"{stock} stock India")
-    url = f"https://news.google.com/rss/search?q={safe_q}&hl=en-IN&gl=IN&ceid=IN:en"
-    return feedparser.parse(url)
-
-@st.cache_data(ttl=300)
-def get_live_price(ticker):
-    """Fetch current price using yfinance"""
-    try:
-        data = yf.Ticker(ticker).history(period="1d")
-        if data.empty:
-            return None
-        close = data["Close"].iloc[-1]
-        openp = data["Open"].iloc[-1]
-        change = ((close - openp) / openp) * 100 if openp != 0 else 0
-        return {"price": round(close, 2), "change_pct": round(change, 2)}
-    except Exception:
-        return None
+    """Fetch Google News for a specific stock."""
+    search_terms = (
+        f"{stock} shareholding pattern OR management OR corporate actions "
+        f"OR order wins OR capacity expansion OR new projects "
+        f"OR credit rating OR audit report OR insider deals OR bulk deals"
+    )
+    feed_url = f"https://news.google.com/rss/search?q={search_terms}+when:6m&hl=en-IN&gl=IN&ceid=IN:en"
+    return feedparser.parse(feed_url)
 
 def get_sentiment(text):
-    """Analyze sentiment using TextBlob"""
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
-    if polarity > 0.1:
-        return "Positive", "🟢"
-    elif polarity < -0.1:
-        return "Negative", "🔴"
-    else:
-        return "Neutral", "🟡"
+    """Use TextBlob to assign sentiment."""
+    try:
+        score = TextBlob(text).sentiment.polarity
+        if score > 0.05:
+            return "Positive"
+        elif score < -0.05:
+            return "Negative"
+        else:
+            return "Neutral"
+    except Exception:
+        return "Neutral"
 
 def build_news_df(stocks, since_date):
-    """Fetch and prepare news dataframe with sentiment"""
-    all_rows = []
+    """Build combined DataFrame of all news for given stocks."""
+    news_data = []
     for s in stocks:
         feed = fetch_news_for_stock(s)
+        if not feed or not hasattr(feed, "entries"):
+            continue
         for e in feed.entries:
-            try:
-                if "published_parsed" not in e:
-                    continue
-                pub = datetime(*e.published_parsed[:6])
-                if pub < since_date:
-                    continue
-                title = e.title
-                link = e.link
-                source = getattr(e, "source", "Google News")
-                sentiment, emoji = get_sentiment(title)
-                all_rows.append({
-                    "Stock": s,
-                    "Title": title,
-                    "Sentiment": sentiment,
-                    "Emoji": emoji,
-                    "Source": source,
-                    "Published": pub,
-                    "Link": link
-                })
-            except Exception:
+            title = e.title
+            link = e.link
+            published = getattr(e, "published", datetime.now().strftime("%Y-%m-%d"))
+            published_date = datetime.strptime(published[:16], "%a, %d %b %Y") if "," in published else datetime.now()
+            if published_date.date() < since_date.date():
                 continue
-    df = pd.DataFrame(all_rows)
+            sentiment = get_sentiment(title)
+            news_data.append({
+                "Stock": s,
+                "Title": title,
+                "Link": link,
+                "Date": published_date.date(),
+                "Sentiment": sentiment,
+            })
+    return pd.DataFrame(news_data)
+
+# -----------------------------
+# Stock List (NSE F&O Major Stocks)
+# -----------------------------
+stocks_list = [
+    "Reliance Industries", "HDFC Bank", "ICICI Bank", "Infosys", "TCS", "Axis Bank",
+    "SBI", "Bharti Airtel", "Kotak Mahindra Bank", "Larsen & Toubro", "ITC",
+    "Hindustan Unilever", "Adani Enterprises", "Maruti Suzuki", "Wipro", "NTPC",
+    "Power Grid", "Bajaj Finance", "HCL Technologies", "Tech Mahindra",
+    "UltraTech Cement", "Tata Motors", "Grasim", "Sun Pharma", "Nestle India",
+    "Tata Steel", "JSW Steel", "Coal India", "ONGC", "HDFC Life", "Asian Paints"
+]
+
+# -----------------------------
+# Tabs Layout
+# -----------------------------
+tab1, tab2, tab3 = st.tabs(["📰 News", "📈 Trending", "💬 Sentiment Analysis"])
+
+# -----------------------------
+# Build News Data
+# -----------------------------
+with st.spinner("Fetching latest news..."):
+    df = build_news_df(stocks_list, since_date)
+
+if df.empty:
+    st.warning("No news found for selected period.")
+else:
+    # Sentiment Emoji Mapping
+    sentiment_emojis = {"Positive": "🟢", "Neutral": "🟡", "Negative": "🔴"}
+    df["Emoji"] = df["Sentiment"].map(sentiment_emojis).fillna("⚪")
+
+# -----------------------------
+# 📰 TAB 1: News Headlines
+# -----------------------------
+with tab1:
+    st.subheader("Latest F&O Stock News (Investor-Focused)")
     if not df.empty:
-        df = df.sort_values(by="Published", ascending=False).reset_index(drop=True)
-    return df
-
-# ---------------------------
-# Tabs
-# ---------------------------
-tabs = st.tabs(["📰 News", "📊 Trending", "📈 Sentiment Overview"])
-news_tab, trending_tab, sentiment_tab = tabs
-
-# ---------------------------
-# TAB 1: NEWS
-# ---------------------------
-with news_tab:
-    st.header("📰 Latest F&O News with Sentiment")
-    if not selected:
-        st.info("Select at least one stock from the sidebar.")
+        for _, r in df.iterrows():
+            emoji = r.get("Emoji", "⚪")
+            st.markdown(
+                f"**{emoji} {r['Stock']}** — *{r['Sentiment']}*  \n"
+                f"[{r['Title']}]({r['Link']})  \n"
+                f"🗓️ {r['Date']}",
+                unsafe_allow_html=True,
+            )
     else:
-        with st.spinner("Fetching latest news..."):
-            df = build_news_df(selected, since_date)
-            prices = {s: get_live_price(FNO_MAP[s]) for s in selected}
+        st.info("No relevant investor-focused news found.")
 
-        if df.empty:
-            st.warning("No news found for the selected stocks or time range.")
-        else:
-            for _, r in df.iterrows():
-                price_info = prices.get(r["Stock"], {})
-                price_str = f"₹{price_info.get('price', '—')} ({price_info.get('change_pct', '—')}%)"
-                st.markdown(
-                    f"**{r['Emoji']} {r['Stock']}** — {r['Sentiment']} | {r['Title']}  \n"
-                    f"📅 {r['Published'].strftime('%Y-%m-%d %H:%M')} | 💰 {price_str}  \n"
-                    f"[🔗 Read full article]({r['Link']})"
-                )
-                st.markdown("---")
-
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("💾 Download CSV", data=csv, file_name="fno_news_sentiment.csv", mime="text/csv")
-
-# ---------------------------
-# TAB 2: TRENDING
-# ---------------------------
-with trending_tab:
-    st.header("📊 Trending Stocks (Most Mentioned)")
-    df_trend = build_news_df(selected, since_date)
-    if df_trend.empty:
-        st.warning("No data available for trending analysis.")
-    else:
-        count_df = df_trend["Stock"].value_counts().reset_index()
-        count_df.columns = ["Stock", "Mentions"]
-        fig = px.bar(count_df, x="Stock", y="Mentions", color="Stock", title="Most Mentioned Stocks in News")
+# -----------------------------
+# 📈 TAB 2: Trending Stocks
+# -----------------------------
+with tab2:
+    st.subheader("Trending Stocks (Most Mentioned)")
+    if not df.empty:
+        top_trending = df["Stock"].value_counts().reset_index()
+        top_trending.columns = ["Stock", "Mentions"]
+        fig = px.bar(
+            top_trending.head(15),
+            x="Stock",
+            y="Mentions",
+            title="🔥 Top 15 Most Mentioned Stocks in News",
+            text="Mentions"
+        )
         st.plotly_chart(fig, use_container_width=True)
-
-# ---------------------------
-# TAB 3: SENTIMENT OVERVIEW
-# ---------------------------
-with sentiment_tab:
-    st.header("📈 Sentiment Overview")
-    df_sent = build_news_df(selected, since_date)
-    if df_sent.empty:
-        st.warning("No sentiment data available.")
     else:
-        df_sent["Date"] = df_sent["Published"].dt.date
-        daily = df_sent.groupby(["Date", "Sentiment"]).size().unstack(fill_value=0).reset_index()
-        fig2 = px.line(daily, x="Date", y=["Positive", "Neutral", "Negative"], title="Daily Sentiment Trend")
+        st.info("No trending data available yet.")
+
+# -----------------------------
+# 💬 TAB 3: Sentiment Analysis
+# -----------------------------
+with tab3:
+    st.subheader("Sentiment Distribution")
+    if not df.empty and "Sentiment" in df.columns:
+        # Pie Chart
+        sentiment_counts = df["Sentiment"].value_counts().reset_index()
+        sentiment_counts.columns = ["Sentiment", "Count"]
+        fig1 = px.pie(
+            sentiment_counts,
+            names="Sentiment",
+            values="Count",
+            title="Overall Sentiment Distribution",
+            color="Sentiment",
+            color_discrete_map={"Positive": "green", "Neutral": "gold", "Negative": "red"}
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+
+        # Daily Trend Chart (Safe)
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+        daily = (
+            df.groupby(["Date", "Sentiment"])
+            .size()
+            .unstack(fill_value=0)
+            .reindex(columns=["Positive", "Neutral", "Negative"], fill_value=0)
+            .reset_index()
+        )
+
+        for col in ["Positive", "Neutral", "Negative"]:
+            if col not in daily.columns:
+                daily[col] = 0
+
+        fig2 = px.line(
+            daily,
+            x="Date",
+            y=["Positive", "Neutral", "Negative"],
+            title="📈 Daily Sentiment Trend",
+            markers=True
+        )
         st.plotly_chart(fig2, use_container_width=True)
-
-        st.subheader("Sentiment Distribution")
-        dist = df_sent["Sentiment"].value_counts().reset_index()
-        dist.columns = ["Sentiment", "Count"]
-        st.dataframe(dist)
-
-st.markdown("---")
-st.caption("Built with Streamlit • News via Google RSS • Sentiment via TextBlob • Live data from Yahoo Finance")
+    else:
+        st.info("Not enough sentiment data to show analysis.")
