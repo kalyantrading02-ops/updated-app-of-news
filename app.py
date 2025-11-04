@@ -323,12 +323,194 @@ st.session_state.setdefault("saved_articles", [])
 st.session_state.setdefault("manual_events", [])
 
 # -----------------------------
-# MAIN TABS (created before use)
+# FETCH RAW NEWS & PREPARE NEWS_RESULTS & HEADLINE MAP
+# (moved outside of the News tab so Upcoming Events can use same data)
 # -----------------------------
-news_tab, trending_tab, sentiment_tab = st.tabs(["📰 News", "🔥 Trending Stocks", "💬 Sentiment"])
+with st.spinner("Fetching latest financial news..."):
+    raw_news_results = fetch_all_news(fo_stocks[:10], start_date, today)
+
+# Filter to only keep articles with visible publisher / source (same logic as before)
+news_results = []
+for r in raw_news_results:
+    stock = r.get("Stock", "")
+    articles = r.get("Articles", []) or []
+    filtered_articles = []
+    for art in articles:
+        pub_field = art.get("publisher")
+        pub_title = ""
+        if isinstance(pub_field, dict):
+            pub_title = (pub_field.get("title") or "").strip()
+        elif isinstance(pub_field, str):
+            pub_title = pub_field.strip()
+        else:
+            pub_title = (art.get("source") or "").strip()
+        if pub_title:
+            if not isinstance(pub_field, dict):
+                art["publisher"] = {"title": pub_title}
+            else:
+                art["publisher"]["title"] = pub_title
+            filtered_articles.append(art)
+    news_results.append({"Stock": stock, "Articles": filtered_articles, "News Count": len(filtered_articles)})
+
+# Build headline -> publishers map for corroboration (same as original)
+headline_map = {}
+for res in news_results:
+    stock = res.get("Stock", "Unknown")
+    for art in res.get("Articles", []) or []:
+        title = art.get("title") or ""
+        norm_head = re.sub(r'\W+', " ", title.lower()).strip()
+        key = norm_head[:120] if norm_head else f"{stock.lower()}_{(title or '')[:40]}"
+        pub = art.get("publisher")
+        pub_name = ""
+        if isinstance(pub, dict):
+            pub_name = pub.get("title") or ""
+        elif isinstance(pub, str):
+            pub_name = pub
+        else:
+            pub_name = art.get("source") or ""
+        headline_map.setdefault(key, []).append(pub_name or "unknown")
 
 # -----------------------------
-# TAB 1 — NEWS (Upcoming Events panel + filtered news)
+# Extract upcoming events from news (same logic as original)
+# -----------------------------
+EVENT_WINDOW_DAYS = 90
+EVENT_KEYWORDS = {
+    "earnings": ["result", "results", "earnings", "q1", "q2", "q3", "q4", "quarterly results", "financial results", "results on", "declare", "declare on"],
+    "board": ["board meeting", "board to meet", "board will meet", "board meeting on"],
+    "dividend": ["ex-date", "ex date", "record date", "dividend", "dividend on", "dividend record"],
+    "agm": ["agm", "annual general meeting", "egm", "extra ordinary general meeting"],
+    "buyback": ["buyback", "buy-back", "tender offer", "acceptance date", "buyback record"],
+    "ipo_listing": ["ipo", "listing", "to list", "list on"],
+    "other": ["merger", "acquisition", "rights issue", "split", "bonus issue", "scheme of arrangement"],
+}
+DATE_PATTERNS = [
+    r'\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b',
+    r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\b(?:[\s,]+\d{4})?',
+    r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,)?\s*\d{0,4}\b',
+    r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
+    r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b',
+    r'\b(next week|next month|tomorrow|today|this week|this month)\b'
+]
+
+def try_parse_date(s):
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        from dateutil.parser import parse as dtparse
+        return dtparse(s, fuzzy=True)
+    except Exception:
+        fmts = ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y", "%d %b", "%d %B"]
+        for f in fmts:
+            try:
+                dt = datetime.strptime(s, f)
+                if dt.year == 1900:
+                    dt = dt.replace(year=datetime.today().year)
+                return dt
+            except Exception:
+                continue
+    return None
+
+def text_for_search(art):
+    parts = []
+    if art.get("title"):
+        parts.append(art.get("title"))
+    if art.get("description"):
+        parts.append(art.get("description"))
+    if art.get("snippet"):
+        parts.append(art.get("snippet"))
+    return " ".join(parts or [""]).lower()
+
+events = []
+for res in news_results:
+    stock = res.get("Stock", "Unknown")
+    for art in res.get("Articles", []) or []:
+        txt = text_for_search(art)
+        if not txt.strip():
+            continue
+        matched_types = []
+        for etype, kws in EVENT_KEYWORDS.items():
+            for kw in kws:
+                if kw in txt:
+                    matched_types.append(etype)
+                    break
+        if not matched_types:
+            continue
+        found_dates = []
+        for patt in DATE_PATTERNS:
+            for m in re.finditer(patt, txt, flags=re.IGNORECASE):
+                cand = m.group(0)
+                parsed = try_parse_date(cand)
+                if parsed:
+                    found_dates.append(parsed)
+                else:
+                    rel = cand.lower()
+                    now = datetime.now()
+                    if "tomorrow" in rel:
+                        found_dates.append(now + timedelta(days=1))
+                    elif "today" in rel:
+                        found_dates.append(now)
+                    elif "next week" in rel:
+                        found_dates.append(now + timedelta(days=7))
+                    elif "next month" in rel:
+                        found_dates.append(now + timedelta(days=30))
+        if not found_dates:
+            m = re.search(r'on ([A-Za-z0-9 ,\-thstndrd]{3,30})', txt)
+            if m:
+                cand = m.group(1)
+                parsed = try_parse_date(cand)
+                if parsed:
+                    found_dates.append(parsed)
+        for dt in found_dates:
+            if not isinstance(dt, datetime):
+                continue
+            if dt.date() < datetime.now().date():
+                continue
+            if (dt - datetime.now()).days > EVENT_WINDOW_DAYS:
+                continue
+            etype_label = matched_types[0] if matched_types else "update"
+            desc = art.get("title") or art.get("description") or ""
+            pub = art.get("publisher")
+            source = ""
+            if isinstance(pub, dict):
+                source = pub.get("title") or ""
+            else:
+                source = pub or art.get("source") or ""
+            url = art.get("url") or art.get("link") or "#"
+            priority = "Normal"
+            try:
+                if is_trusted(source):
+                    priority = "High"
+            except Exception:
+                priority = "Normal"
+            events.append({"stock": stock, "type": etype_label, "desc": desc, "date": dt, "source": source, "url": url, "priority": priority})
+
+# dedupe events by (stock, type, date)
+unique = {}
+for e in events:
+    key = (e["stock"], e["type"], e["date"].date())
+    if key not in unique:
+        unique[key] = e
+    else:
+        existing = unique[key]
+        if e["source"] and e["source"] not in existing.get("source", ""):
+            existing["source"] += f"; {e['source']}"
+events = sorted(unique.values(), key=lambda x: (x["date"], x["priority"] == "High"))
+
+# include manual events from session
+manual = st.session_state.get("manual_events", [])
+for me in manual:
+    events.append({"stock": me.get("stock", "Manual"), "type": me.get("type", "manual"), "desc": me.get("desc", ""), "date": me.get("date"), "source": "Manual", "url": "#", "priority": me.get("priority", "Normal")})
+events = sorted(events, key=lambda x: (x["date"] if isinstance(x["date"], datetime) else datetime.max))
+
+# -----------------------------
+# MAIN TABS (created before use)
+# Now include the 4th tab for Upcoming Events (moved out of News)
+# -----------------------------
+news_tab, trending_tab, sentiment_tab, events_tab = st.tabs(["📰 News", "🔥 Trending Stocks", "💬 Sentiment", "📅 Upcoming Events"])
+
+# -----------------------------
+# TAB 1 — NEWS (filtered news, WITHOUT Upcoming Events panel)
 # -----------------------------
 with news_tab:
     st.header("🗞️ Latest Market News for F&O Stocks")
@@ -342,227 +524,9 @@ with news_tab:
     with c3:
         show_snippet = st.checkbox("Show snippet", value=True)
 
-    # -----------------------------
-    # UPCOMING EVENTS EXTRACTION (separate panel)
-    # -----------------------------
-    EVENT_WINDOW_DAYS = 90
-    EVENT_KEYWORDS = {
-        "earnings": ["result", "results", "earnings", "q1", "q2", "q3", "q4", "quarterly results", "financial results", "results on", "declare", "declare on"],
-        "board": ["board meeting", "board to meet", "board will meet", "board meeting on"],
-        "dividend": ["ex-date", "ex date", "record date", "dividend", "dividend on", "dividend record"],
-        "agm": ["agm", "annual general meeting", "egm", "extra ordinary general meeting"],
-        "buyback": ["buyback", "buy-back", "tender offer", "acceptance date", "buyback record"],
-        "ipo_listing": ["ipo", "listing", "to list", "list on"],
-        "other": ["merger", "acquisition", "rights issue", "split", "bonus issue", "scheme of arrangement"],
-    }
-    DATE_PATTERNS = [
-        r'\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b',
-        r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\b(?:[\s,]+\d{4})?',
-        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,)?\s*\d{0,4}\b',
-        r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
-        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b',
-        r'\b(next week|next month|tomorrow|today|this week|this month)\b'
-    ]
-
-    def try_parse_date(s):
-        s = (s or "").strip()
-        if not s:
-            return None
-        try:
-            from dateutil.parser import parse as dtparse
-            return dtparse(s, fuzzy=True)
-        except Exception:
-            fmts = ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y", "%d %b", "%d %B"]
-            for f in fmts:
-                try:
-                    dt = datetime.strptime(s, f)
-                    if dt.year == 1900:
-                        dt = dt.replace(year=datetime.today().year)
-                    return dt
-                except Exception:
-                    continue
-        return None
-
-    def text_for_search(art):
-        parts = []
-        if art.get("title"):
-            parts.append(art.get("title"))
-        if art.get("description"):
-            parts.append(art.get("description"))
-        if art.get("snippet"):
-            parts.append(art.get("snippet"))
-        return " ".join(parts or [""]).lower()
-
-    # Fetch raw news for top stocks
-    with st.spinner("Fetching latest financial news..."):
-        raw_news_results = fetch_all_news(fo_stocks[:10], start_date, today)
-
-    # Filter to only keep articles with visible publisher / source
-    news_results = []
-    for r in raw_news_results:
-        stock = r.get("Stock", "")
-        articles = r.get("Articles", []) or []
-        filtered_articles = []
-        for art in articles:
-            pub_field = art.get("publisher")
-            pub_title = ""
-            if isinstance(pub_field, dict):
-                pub_title = (pub_field.get("title") or "").strip()
-            elif isinstance(pub_field, str):
-                pub_title = pub_field.strip()
-            else:
-                pub_title = (art.get("source") or "").strip()
-            if pub_title:
-                if not isinstance(pub_field, dict):
-                    art["publisher"] = {"title": pub_title}
-                else:
-                    art["publisher"]["title"] = pub_title
-                filtered_articles.append(art)
-        news_results.append({"Stock": stock, "Articles": filtered_articles, "News Count": len(filtered_articles)})
-
-    # Build headline -> publishers map for corroboration
-    headline_map = {}
-    for res in news_results:
-        stock = res.get("Stock", "Unknown")
-        for art in res.get("Articles", []) or []:
-            title = art.get("title") or ""
-            norm_head = re.sub(r'\W+', " ", title.lower()).strip()
-            key = norm_head[:120] if norm_head else f"{stock.lower()}_{(title or '')[:40]}"
-            pub = art.get("publisher")
-            pub_name = ""
-            if isinstance(pub, dict):
-                pub_name = pub.get("title") or ""
-            elif isinstance(pub, str):
-                pub_name = pub
-            else:
-                pub_name = art.get("source") or ""
-            headline_map.setdefault(key, []).append(pub_name or "unknown")
-
-    # Extract upcoming events (from news_results) — separate list
-    events = []
-    for res in news_results:
-        stock = res.get("Stock", "Unknown")
-        for art in res.get("Articles", []) or []:
-            txt = text_for_search(art)
-            if not txt.strip():
-                continue
-            matched_types = []
-            for etype, kws in EVENT_KEYWORDS.items():
-                for kw in kws:
-                    if kw in txt:
-                        matched_types.append(etype)
-                        break
-            if not matched_types:
-                continue
-            found_dates = []
-            for patt in DATE_PATTERNS:
-                for m in re.finditer(patt, txt, flags=re.IGNORECASE):
-                    cand = m.group(0)
-                    parsed = try_parse_date(cand)
-                    if parsed:
-                        found_dates.append(parsed)
-                    else:
-                        rel = cand.lower()
-                        now = datetime.now()
-                        if "tomorrow" in rel:
-                            found_dates.append(now + timedelta(days=1))
-                        elif "today" in rel:
-                            found_dates.append(now)
-                        elif "next week" in rel:
-                            found_dates.append(now + timedelta(days=7))
-                        elif "next month" in rel:
-                            found_dates.append(now + timedelta(days=30))
-            if not found_dates:
-                m = re.search(r'on ([A-Za-z0-9 ,\-thstndrd]{3,30})', txt)
-                if m:
-                    cand = m.group(1)
-                    parsed = try_parse_date(cand)
-                    if parsed:
-                        found_dates.append(parsed)
-            for dt in found_dates:
-                if not isinstance(dt, datetime):
-                    continue
-                if dt.date() < datetime.now().date():
-                    continue
-                if (dt - datetime.now()).days > EVENT_WINDOW_DAYS:
-                    continue
-                etype_label = matched_types[0] if matched_types else "update"
-                desc = art.get("title") or art.get("description") or ""
-                pub = art.get("publisher")
-                source = ""
-                if isinstance(pub, dict):
-                    source = pub.get("title") or ""
-                else:
-                    source = pub or art.get("source") or ""
-                url = art.get("url") or art.get("link") or "#"
-                priority = "Normal"
-                try:
-                    if is_trusted(source):
-                        priority = "High"
-                except Exception:
-                    priority = "Normal"
-                events.append({"stock": stock, "type": etype_label, "desc": desc, "date": dt, "source": source, "url": url, "priority": priority})
-
-    # dedupe events by (stock, type, date)
-    unique = {}
-    for e in events:
-        key = (e["stock"], e["type"], e["date"].date())
-        if key not in unique:
-            unique[key] = e
-        else:
-            existing = unique[key]
-            if e["source"] and e["source"] not in existing.get("source", ""):
-                existing["source"] += f"; {e['source']}"
-    events = sorted(unique.values(), key=lambda x: (x["date"], x["priority"] == "High"))
-
-    # include manual events from session
-    manual = st.session_state.get("manual_events", [])
-    for me in manual:
-        events.append({"stock": me.get("stock", "Manual"), "type": me.get("type", "manual"), "desc": me.get("desc", ""), "date": me.get("date"), "source": "Manual", "url": "#", "priority": me.get("priority", "Normal")})
-    events = sorted(events, key=lambda x: (x["date"] if isinstance(x["date"], datetime) else datetime.max))
-
-    # Upcoming Events panel (separate)
-    st.subheader(f"📅 Upcoming Market-Moving Events (next {EVENT_WINDOW_DAYS} days) — {len(events)} found")
-    if events:
-        rows = []
-        for e in events:
-            rows.append({
-                "Stock": e["stock"],
-                "Event": e["type"].title(),
-                "When": e["date"].strftime("%Y-%m-%d %H:%M") if isinstance(e["date"], datetime) else str(e["date"]),
-                "Priority": e.get("priority", "Normal"),
-                "Source": e.get("source", ""),
-                "Link": e.get("url", "#")
-            })
-        df_events = pd.DataFrame(rows)
-        st.dataframe(df_events, use_container_width=True)
-        for e in events[:10]:
-            date_str = e["date"].strftime("%Y-%m-%d") if isinstance(e["date"], datetime) else str(e["date"])
-            st.markdown(f"- **{e['stock']}** — *{e['type'].title()}* on **{date_str}** — *{e['priority']}* — [{e['source']}]({e['url']})")
-    else:
-        st.info("No upcoming company updates found from recent news. Add manually if needed.")
-        with st.expander("➕ Add manual event"):
-            m_stock = st.text_input("Stock name / company")
-            m_type = st.selectbox("Event type", ["Earnings/Results", "Board Meeting", "Ex-dividend / Record Date", "AGM/EGM", "Buyback", "IPO/Listing", "Other"])
-            m_date = st.date_input("Event date", value=datetime.now().date() + timedelta(days=7))
-            m_desc = st.text_area("Short description (optional)")
-            m_priority = st.selectbox("Priority", ["Normal", "High"])
-            if st.button("Add event to watchlist"):
-                st.session_state.setdefault("manual_events", [])
-                st.session_state["manual_events"].append({
-                    "stock": m_stock,
-                    "type": m_type,
-                    "date": datetime.combine(m_date, datetime.min.time()),
-                    "desc": m_desc,
-                    "priority": m_priority
-                })
-                st.success("Manual event added (session only). It will appear in Upcoming Events on next refresh.")
-
     st.markdown("---")
 
-    # -----------------------------
     # Now show the regular news (expanders per stock), filtered and scored
-    # -----------------------------
     displayed_total = 0
     filtered_out_total = 0
 
@@ -687,6 +651,46 @@ with sentiment_tab:
             st.download_button("📥 Download Sentiment Data", csv_bytes, "sentiment_data.csv", "text/csv")
         else:
             st.warning("No sentiment data found for the selected timeframe.")
+
+# -----------------------------
+# TAB 4 — UPCOMING EVENTS (moved here; logic unchanged)
+# -----------------------------
+with events_tab:
+    st.subheader(f"📅 Upcoming Market-Moving Events (next {EVENT_WINDOW_DAYS} days) — {len(events)} found")
+    if events:
+        rows = []
+        for e in events:
+            rows.append({
+                "Stock": e["stock"],
+                "Event": e["type"].title(),
+                "When": e["date"].strftime("%Y-%m-%d %H:%M") if isinstance(e["date"], datetime) else str(e["date"]),
+                "Priority": e.get("priority", "Normal"),
+                "Source": e.get("source", ""),
+                "Link": e.get("url", "#")
+            })
+        df_events = pd.DataFrame(rows)
+        st.dataframe(df_events, use_container_width=True)
+        for e in events[:10]:
+            date_str = e["date"].strftime("%Y-%m-%d") if isinstance(e["date"], datetime) else str(e["date"])
+            st.markdown(f"- **{e['stock']}** — *{e['type'].title()}* on **{date_str}** — *{e['priority']}* — [{e['source']}]({e['url']})")
+    else:
+        st.info("No upcoming company updates found from recent news. Add manually if needed.")
+    with st.expander("➕ Add manual event"):
+        m_stock = st.text_input("Stock name / company")
+        m_type = st.selectbox("Event type", ["Earnings/Results", "Board Meeting", "Ex-dividend / Record Date", "AGM/EGM", "Buyback", "IPO/Listing", "Other"])
+        m_date = st.date_input("Event date", value=datetime.now().date() + timedelta(days=7))
+        m_desc = st.text_area("Short description (optional)")
+        m_priority = st.selectbox("Priority", ["Normal", "High"])
+        if st.button("Add event to watchlist"):
+            st.session_state.setdefault("manual_events", [])
+            st.session_state["manual_events"].append({
+                "stock": m_stock,
+                "type": m_type,
+                "date": datetime.combine(m_date, datetime.min.time()),
+                "desc": m_desc,
+                "priority": m_priority
+            })
+            st.success("Manual event added (session only). It will appear in Upcoming Events on next refresh.")
 
 # -----------------------------
 # FOOTER
