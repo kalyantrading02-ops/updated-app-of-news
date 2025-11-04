@@ -1,5 +1,195 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from datetime import datetime, timedelta
+from gnews import GNews
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import nltk
+import time
+import re
+
 # -----------------------------
-# TAB 1 — NEWS (market-impacting filter + UI)  <-- REPLACE YOUR OLD NEWS BLOCK WITH THIS
+# INITIAL SETUP
+# -----------------------------
+nltk.download('vader_lexicon', quiet=True)
+st.set_page_config(page_title="Stock News & Sentiment Dashboard", layout="wide")
+
+# -----------------------------
+# SIDEBAR — DARK MODE TOGGLE
+# -----------------------------
+st.sidebar.header("⚙️ Settings")
+# keeping your original toggle
+dark_mode = st.sidebar.toggle("🌗 Dark Mode", value=True, help="Switch instantly between Dark & Light Mode")
+
+# -----------------------------
+# APPLY THEMES
+# -----------------------------
+if dark_mode:
+    bg_gradient = "linear-gradient(135deg, #0f2027, #203a43, #2c5364)"
+    text_color = "#EAEAEA"
+    accent_color = "#00E676"
+    plot_theme = "plotly_dark"
+else:
+    bg_gradient = "linear-gradient(135deg, #FFFFFF, #E0E0E0, #F5F5F5)"
+    text_color = "#111111"
+    accent_color = "#0078FF"
+    plot_theme = "plotly_white"
+
+st.markdown(f"""
+<style>
+body {{
+  background: {bg_gradient};
+  color: {text_color};
+}}
+.stApp {{
+  background: {bg_gradient} !important;
+  color: {text_color} !important;
+}}
+h1, h2, h3, h4, h5 {{
+  color: {accent_color} !important;
+}}
+.stButton button {{
+  background-color: {accent_color} !important;
+  color: black !important;
+  border-radius: 6px;
+}}
+.stDataFrame {{
+  border-radius: 10px;
+  background-color: rgba(255,255,255,0.05);
+}}
+.block-container {{
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}}
+.news-card {{
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  transition: transform .12s ease, box-shadow .12s ease;
+  background: rgba(255,255,255,0.02);
+  margin-bottom: 12px;
+}}
+.news-card:hover {{ transform: translateY(-4px); box-shadow: 0 10px 30px rgba(0,0,0,0.16); }}
+.headline {{ font-weight:600; font-size:16px; margin-bottom:6px; }}
+.meta {{ font-size:12px; color: #9aa0a6; margin-bottom:8px; }}
+.snip {{ font-size:13px; color: #dfe6ea; }}
+.badge {{ display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; margin-right:6px; }}
+.badge-source {{ background: rgba(255,255,255,0.04); color:inherit; }}
+.badge-pos {{ background: rgba(0,200,83,0.12); color:#00C853; }}
+.badge-neu {{ background: rgba(255,193,7,0.08); color:#FFC107; }}
+.badge-neg {{ background: rgba(239,83,80,0.08); color:#EF5350; }}
+.priority-high {{ background: rgba(239,83,80,0.12); color:#EF5350; padding:6px 10px; border-radius:8px; font-weight:600; }}
+.priority-med {{ background: rgba(255,193,7,0.08); color:#FFC107; padding:6px 10px; border-radius:8px; font-weight:600; }}
+.priority-low {{ background: rgba(128,128,128,0.06); color:#9aa0a6; padding:6px 10px; border-radius:8px; font-weight:600; }}
+.reason-chip {{ display:inline-block; margin:3px 4px; padding:4px 8px; border-radius:999px; font-size:12px; background: rgba(255,255,255,0.03); }}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------
+# APP TITLE
+# -----------------------------
+st.title("💹 Stock Market News & Sentiment Dashboard")
+
+# -----------------------------
+# AUTO REFRESH EVERY 10 MIN
+# -----------------------------
+refresh_interval = 600
+if "last_refresh" not in st.session_state:
+    st.session_state["last_refresh"] = time.time()
+elif time.time() - st.session_state["last_refresh"] > refresh_interval:
+    st.session_state["last_refresh"] = time.time()
+    # using st.rerun as in your running code
+    try:
+        st.rerun()
+    except Exception:
+        # fallback: try experimental_rerun silently
+        try:
+            st.experimental_rerun()
+        except Exception:
+            st.warning("Auto-refresh not supported in this Streamlit build; please refresh the page manually.")
+            st.stop()
+
+# -----------------------------
+# SIDEBAR FILTERS
+# -----------------------------
+st.sidebar.header("📅 Filter Options")
+time_period = st.sidebar.selectbox(
+    "Select Time Period",
+    ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"]
+)
+
+today = datetime.today()
+if time_period == "Last Week":
+    start_date = today - timedelta(days=7)
+elif time_period == "Last Month":
+    start_date = today - timedelta(days=30)
+elif time_period == "Last 3 Months":
+    start_date = today - timedelta(days=90)
+else:
+    start_date = today - timedelta(days=180)
+
+# -----------------------------
+# F&O STOCK LIST
+# -----------------------------
+fo_stocks = [
+    "Reliance Industries", "TCS", "Infosys", "HDFC Bank", "ICICI Bank", "State Bank of India",
+    "HCL Technologies", "Wipro", "Larsen & Toubro", "Tata Motors", "Bajaj Finance", "Axis Bank",
+    "NTPC", "ITC", "Adani Enterprises", "Coal India", "Power Grid", "Maruti Suzuki",
+    "Tech Mahindra", "Sun Pharma"
+]
+
+# -----------------------------
+# PERFORMANCE BOOSTERS: fetch functions
+# -----------------------------
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_news(stock, start, end):
+    try:
+        gnews = GNews(language='en', country='IN', max_results=10)
+        try:
+            gnews.start_date, gnews.end_date = start, end
+        except Exception:
+            pass
+        return gnews.get_news(stock) or []
+    except Exception:
+        return []
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_all_news(stocks, start, end):
+    results = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_news, s, start, end): s for s in stocks}
+        for future in as_completed(futures):
+            stock = futures[future]
+            try:
+                articles = future.result() or []
+                results.append({"Stock": stock, "Articles": articles, "News Count": len(articles)})
+            except Exception:
+                results.append({"Stock": stock, "Articles": [], "News Count": 0})
+    return results
+
+# sentiment analyzer (existing)
+analyzer = SentimentIntensityAnalyzer()
+def analyze_sentiment(text):
+    if not text:
+        text = ""
+    score = analyzer.polarity_scores(text)["compound"]
+    if score > 0.2:
+        return "Positive", "🟢"
+    elif score < -0.2:
+        return "Negative", "🔴"
+    else:
+        return "Neutral", "🟡"
+
+# -----------------------------
+# MAIN TABS — ensure these are created BEFORE using them
+# -----------------------------
+news_tab, trending_tab, sentiment_tab = st.tabs([
+    "📰 News", "🔥 Trending Stocks", "💬 Sentiment"
+])
+
+# -----------------------------
+# TAB 1 — NEWS (market-impacting filter + UI)
 # -----------------------------
 with news_tab:
     st.header("🗞️ Latest Market News for F&O Stocks (Market-impacting only)")
@@ -63,13 +253,10 @@ with news_tab:
         p = norm_text(publisher)
         return any(lq in p for lq in LOW_QUALITY_SOURCES)
 
-    import re
     numeric_re = re.compile(NUMERIC_PATTERN, re.IGNORECASE)
-
     def has_numeric(text):
         return bool(numeric_re.search(text or ""))
 
-    # scoring function (simple weighted sum + corroboration)
     def score_article(title, desc, publisher, corroboration_sources=None):
         raw = 0
         reasons = []
@@ -104,7 +291,6 @@ with news_tab:
         if contains_any(txt, SPECULATIVE_WORDS):
             raw += WEIGHTS["speculative_penalty"]; reasons.append("Speculative Language (penalized)")
 
-        # corroboration bonus: count distinct trusted publishers in corroboration_sources (if provided)
         corroboration_bonus = 0
         if corroboration_sources:
             trusted_count = sum(1 for s in set(corroboration_sources) if s and is_trusted(s))
@@ -116,20 +302,19 @@ with news_tab:
         score = max(0, min(100, raw + corroboration_bonus))
         return int(score), reasons
 
-    # Fetch news (same as before)
+    # Fetch news for top 10 F&O stocks
     with st.spinner("Fetching the latest financial news..."):
         news_results = fetch_all_news(fo_stocks[:10], start_date, today)
 
-    # Build quick map of headline -> publisher list for corroboration
+    # Build map headline->publishers for corroboration
     headline_map = {}
-    flat_articles = []  # keep flat list for display & scoring
+    flat_articles = []
     for res in news_results:
         stock = res["Stock"]
         for art in res.get("Articles", []):
             title = art.get("title") or ""
             desc = art.get("description") or art.get("snippet") or ""
             pub_field = art.get("publisher")
-            publisher = ""
             if isinstance(pub_field, dict):
                 publisher = pub_field.get("title") or ""
             elif isinstance(pub_field, str):
@@ -137,7 +322,6 @@ with news_tab:
             else:
                 publisher = art.get("source") or ""
             url = art.get("url") or art.get("link") or "#"
-            # normalized headline key (short)
             norm_head = re.sub(r'\W+', ' ', title.lower()).strip()
             key = norm_head[:120] if norm_head else stock.lower() + "_" + title[:40]
             headline_map.setdefault(key, []).append(publisher or "unknown")
@@ -151,15 +335,13 @@ with news_tab:
                 "raw": art
             })
 
-    # Score each article and decide display
+    # Score and display — keep your expander style per stock
     displayed_count = 0
     filtered_out_count = 0
 
-    # We'll keep your original expander-per-stock UI, but filter articles inside each expander by score if only_impact is on
     for res in news_results:
         stock = res["Stock"]
         articles = res.get("Articles", []) or []
-        # compute scored articles for this stock
         scored_list = []
         for art in articles:
             title = art.get("title") or ""
@@ -182,29 +364,26 @@ with news_tab:
                 "publisher": publisher or "Unknown Source",
                 "url": url,
                 "score": score,
-                "reasons": reasons
+                "reasons": reasons,
+                "raw": art
             })
 
-        # If only_impact is true, filter out low-score articles
         if only_impact:
             visible_articles = [s for s in scored_list if s["score"] >= threshold]
         else:
             visible_articles = scored_list
 
-        # count filtered
         filtered_out_count += (len(scored_list) - len(visible_articles))
         displayed_count += len(visible_articles)
 
-        # display same expander as before but only with visible articles inside
         with st.expander(f"🔹 {stock} ({len(visible_articles)} Articles shown, scanned {len(scored_list)})", expanded=False):
             if visible_articles:
                 for art in visible_articles[:10]:
                     title = art["title"]
                     url = art["url"]
                     publisher = art["publisher"]
-                    published_date = art.get("raw", {}).get("published date", "N/A") if isinstance(art.get("raw", {}), dict) else "N/A"
-                    # But we don't want to change your existing simple markdown for links; keep that but add badges
-                    # Compose reason chips and priority badge
+                    pub_raw = art.get("raw", {})
+                    published_date = pub_raw.get("published date") if isinstance(pub_raw, dict) else "N/A"
                     score = art["score"]
                     if score >= 70:
                         priority = "High"
@@ -215,21 +394,66 @@ with news_tab:
                     else:
                         priority = "Low"
                         priority_color = "⚪"
-                    # reason chips text
                     reasons_txt = " • ".join(art["reasons"]) if art["reasons"] else "Signals detected"
-                    # sentiment from your existing analyzer function
-                    sentiment, emot = analyze_sentiment(title + " " + (art["desc"] or ""))
-                    # Render: headline link + publisher + date + priority + reasons + snippet
-                    st.markdown(f"**[{title}]({url})**  {priority_color} *{priority} ({score})*  🏢 *{publisher}* | 🗓️ *{published_date}*")
-                    st.markdown(f"*Reasons:* `{reasons_txt}`  •  *Sentiment:* {emot} {sentiment}")
+                    sentiment_label, emot = analyze_sentiment(title + " " + (art["desc"] or ""))
+                    st.markdown(f"**[{title}]({url})**  {priority_color} *{priority} ({score})*  🏢 *{publisher}* | 🗓️ *{published_date or 'N/A'}*")
+                    st.markdown(f"*Reasons:* `{reasons_txt}`  •  *Sentiment:* {emot} {sentiment_label}")
                     if show_snippet and art.get("desc"):
                         snippet = art["desc"] if len(art["desc"]) < 220 else art["desc"][:217] + "..."
                         st.markdown(f"> {snippet}")
                     st.markdown("---")
             else:
                 st.info("No market-impacting news found for this stock in the selected time period.")
-    # end for stocks
 
-    # Show aggregate summary (keeps UI consistent)
     total_scanned = sum(len(res.get("Articles", [])) for res in news_results)
     st.markdown(f"**Summary:** Displayed **{displayed_count}** articles • Filtered out **{filtered_out_count}** • Scanned **{total_scanned}**")
+
+# -----------------------------
+# TAB 2 — TRENDING STOCKS (unchanged)
+# -----------------------------
+with trending_tab:
+    st.header("🔥 Trending F&O Stocks by News Mentions")
+    with st.spinner("Analyzing trends..."):
+        all_results = fetch_all_news(fo_stocks, start_date, today)
+        counts = [{"Stock": r["Stock"], "News Count": r.get("News Count", len(r.get("Articles", [])))} for r in all_results]
+        df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False)
+        fig = px.bar(df_counts, x="Stock", y="News Count", color="News Count",
+                     color_continuous_scale="Turbo", title=f"Trending F&O Stocks ({time_period})",
+                     template=plot_theme)
+        st.plotly_chart(fig, use_container_width=True)
+
+# -----------------------------
+# TAB 3 — SENTIMENT (unchanged)
+# -----------------------------
+with sentiment_tab:
+    st.header("💬 Sentiment Analysis")
+    with st.spinner("Analyzing sentiment..."):
+        sentiment_data = []
+        all_results = fetch_all_news(fo_stocks[:10], start_date, today)
+        for res in all_results:
+            stock = res["Stock"]
+            for art in res["Articles"][:3]:
+                sentiment, emoji = analyze_sentiment(art.get("title") or "")
+                sentiment_data.append({
+                    "Stock": stock,
+                    "Headline": art.get("title") or "",
+                    "Sentiment": sentiment,
+                    "Emoji": emoji
+                })
+        if sentiment_data:
+            sentiment_df = pd.DataFrame(sentiment_data)
+            st.dataframe(sentiment_df, use_container_width=True)
+            st.download_button(
+                "📥 Download Sentiment Data",
+                sentiment_df.to_csv(index=False).encode("utf-8"),
+                "sentiment_data.csv",
+                "text/csv"
+            )
+        else:
+            st.warning("No sentiment data found.")
+
+# -----------------------------
+# FOOTER
+# -----------------------------
+st.markdown("---")
+st.caption(f"📊 Data Source: Google News | Mode: {'Dark' if dark_mode else 'Light'} | Auto-refresh every 10 min | Built with ❤️ using Streamlit & Plotly")
