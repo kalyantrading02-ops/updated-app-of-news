@@ -1,49 +1,64 @@
 # app.py
-# Streamlit Stock News Dashboard with real sentiment (VADER / TextBlob),
+# Streamlit Stock News Dashboard with robust handling when TextBlob is missing.
+# Features: VADER sentiment (always), optional TextBlob sentiment (if installed),
 # cached API calls, search box for custom stocks, and parallel news fetching.
-#
-# Requirements (put in requirements.txt):
-# streamlit
-# pandas
-# plotly
-# gnews
-# nltk
-# textblob
-#
-# Note: The app will attempt to download required NLTK resources at runtime
-# (vader_lexicon and punkt) if they are missing.
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from gnews import GNews
 import concurrent.futures
-import time
 import random
-import math
-
-# Sentiment libraries
-from textblob import TextBlob
 import nltk
 
-# Try to import VADER, and download lexicon if missing
+# Try to import TextBlob; if missing, degrade gracefully.
+TEXTBLOB_AVAILABLE = True
+try:
+    from textblob import TextBlob
+except Exception:
+    TEXTBLOB_AVAILABLE = False
+
+# Try to import VADER; download lexicon if not present
 try:
     from nltk.sentiment.vader import SentimentIntensityAnalyzer
 except Exception:
-    nltk.download("vader_lexicon")
-    from nltk.sentiment.vader import SentimentIntensityAnalyzer
+    try:
+        nltk.download("vader_lexicon")
+        from nltk.sentiment.vader import SentimentIntensityAnalyzer
+    except Exception:
+        # If vader can't be loaded, we'll fail later with clear message
+        SentimentIntensityAnalyzer = None
 
-# Ensure punkt for TextBlob (for better sentence tokenization) - safe to attempt
-try:
-    nltk.data.find("tokenizers/punkt")
-except LookupError:
-    nltk.download("punkt")
+# Ensure punkt for TextBlob (if available)
+if TEXTBLOB_AVAILABLE:
+    try:
+        nltk.data.find("tokenizers/punkt")
+    except LookupError:
+        try:
+            nltk.download("punkt")
+        except Exception:
+            # continue; TextBlob may still work without punkt for simple usage
+            pass
 
 # ---------------------------------
 # Streamlit page config
 # ---------------------------------
 st.set_page_config(page_title="Stock News & Sentiment Dashboard", layout="wide")
-st.title("📰 Stock Market News Dashboard — VADER / TextBlob Sentiment")
+st.title("📰 Stock Market News Dashboard — Robust TextBlob Handling")
+
+# If TextBlob not available, inform user how to add it
+if not TEXTBLOB_AVAILABLE:
+    st.warning(
+        "TextBlob package not found in the environment. "
+        "The app will still run using VADER. "
+        "To enable TextBlob sentiment, add `textblob` to your requirements.txt and redeploy."
+    )
+
+if SentimentIntensityAnalyzer is None:
+    st.error(
+        "VADER Sentiment Analyzer could not be loaded. "
+        "Ensure `nltk` is installed and the 'vader_lexicon' resource is available."
+    )
 
 # ---------------------------------
 # Sidebar controls
@@ -55,19 +70,16 @@ time_period = st.sidebar.selectbox(
     ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"]
 )
 
-sentiment_model = st.sidebar.selectbox(
-    "Sentiment Analyzer",
-    ["VADER (fast, rule-based)", "TextBlob (polarity)"]
-)
+# Build sentiment model options depending on availability
+sentiment_options = ["VADER (fast, rule-based)"]
+if TEXTBLOB_AVAILABLE:
+    sentiment_options.append("TextBlob (polarity)")
+
+sentiment_model = st.sidebar.selectbox("Sentiment Analyzer", sentiment_options)
 
 max_articles_per_stock = st.sidebar.slider("Max articles per stock (each stock)", 1, 20, 5)
-
-# Automatic stock search settings
 parallel_workers = st.sidebar.slider("Parallel workers (threads)", 2, 20, 8)
 
-# ---------------------------------
-# Sidebar: Add a custom stock / ticker
-# ---------------------------------
 st.sidebar.markdown("---")
 st.sidebar.subheader("Add / Search Stock")
 custom_stock_input = st.sidebar.text_input("Type a stock or company name (e.g. 'Reliance Industries')", "")
@@ -84,7 +96,6 @@ default_fo_stocks = [
     "Tech Mahindra", "Sun Pharma"
 ]
 
-# Manage stocks list in session state so user additions persist during the session
 if "fo_stocks" not in st.session_state:
     st.session_state.fo_stocks = default_fo_stocks.copy()
 
@@ -92,7 +103,6 @@ if add_stock_button and custom_stock_input.strip():
     st.session_state.fo_stocks.insert(0, custom_stock_input.strip())
     st.success(f"Added '{custom_stock_input.strip()}' to the list")
 
-# Allow user to remove a stock (simple UI)
 st.sidebar.markdown("**Current tracked stocks (top 30 shown):**")
 for idx, s in enumerate(st.session_state.fo_stocks[:30]):
     col1, col2 = st.sidebar.columns([8, 2])
@@ -114,53 +124,37 @@ elif time_period == "Last 3 Months":
 else:
     start_date = today - timedelta(days=180)
 
-# Format date strings for GNews
 start_date_str = start_date.strftime("%Y-%m-%d")
 end_date_str = today.strftime("%Y-%m-%d")
 
 # ---------------------------------
-# Caching helpers (Streamlit cache_data)
+# Caching helpers
 # ---------------------------------
 @st.cache_data(show_spinner=False)
 def make_gnews_client():
-    """Create GNews client object (cached)."""
     return GNews(language="en", country="IN")
 
 @st.cache_data(show_spinner=False)
 def fetch_articles_for_query(query: str, start: str, end: str, max_articles: int):
-    """
-    Fetch articles for query using GNews.
-    Cached by (query, start, end, max_articles).
-    Returns list of article dicts.
-    """
     client = make_gnews_client()
     try:
-        # GNews.get_news returns recent results; we will take up to max_articles
         articles = client.get_news(query)
-        # GNews returns recent global hits; filter by published date if available
-        # The 'published' field is a string; GNews may not always provide structured dates.
-        # We'll just take the top `max_articles` items returned.
         return articles[:max_articles] if articles else []
-    except Exception as e:
-        # On failure, return empty list (and show later).
+    except Exception:
         return []
 
 @st.cache_data(show_spinner=False)
 def compute_sentiment_for_text(text: str, model: str):
-    """
-    Compute sentiment for a given text using chosen model.
-    Returns dict: {'score': float, 'label': 'Positive'|'Neutral'|'Negative'}
-    Cached by (text, model).
-    """
     text = (text or "").strip()
     if not text:
         return {"score": 0.0, "label": "Neutral"}
 
     if model == "VADER":
+        if SentimentIntensityAnalyzer is None:
+            return {"score": 0.0, "label": "Neutral"}
         sid = SentimentIntensityAnalyzer()
         scores = sid.polarity_scores(text)
-        compound = scores["compound"]
-        # VADER thresholds: >0.05 positive, < -0.05 negative else neutral
+        compound = scores.get("compound", 0.0)
         if compound >= 0.05:
             label = "Positive"
         elif compound <= -0.05:
@@ -168,10 +162,12 @@ def compute_sentiment_for_text(text: str, model: str):
         else:
             label = "Neutral"
         return {"score": compound, "label": label}
-
-    else:  # TextBlob
+    else:  # TextBlob path (only used if TEXTBLOB_AVAILABLE is True)
+        if not TEXTBLOB_AVAILABLE:
+            # fallback to neutral if user somehow selected TextBlob but it's unavailable
+            return {"score": 0.0, "label": "Neutral"}
         blob = TextBlob(text)
-        polarity = blob.sentiment.polarity  # -1 to 1
+        polarity = blob.sentiment.polarity
         if polarity > 0.05:
             label = "Positive"
         elif polarity < -0.05:
@@ -180,7 +176,6 @@ def compute_sentiment_for_text(text: str, model: str):
             label = "Neutral"
         return {"score": polarity, "label": label}
 
-# Helper to convert label -> emoji
 def sentiment_emoji(label: str):
     return {"Positive": "🟢", "Neutral": "🟡", "Negative": "🔴"}.get(label, "🟡")
 
@@ -190,35 +185,27 @@ def sentiment_emoji(label: str):
 news_tab, trending_tab, sentiment_tab = st.tabs(["📰 News", "🔥 Trending Stocks", "💬 Sentiment"])
 
 # ---------------------------------
-# Utility: parallel fetch wrapper
+# Parallel fetch wrapper
 # ---------------------------------
 def fetch_counts_parallel(stock_list, start_s, end_s, max_articles_per_stock, workers=8):
-    """
-    For a list of stocks, fetch article counts in parallel.
-    Returns list of dicts [{"Stock":..., "News Count": ..., "Articles": [...]}]
-    """
     results = []
-
-    # Use ThreadPoolExecutor for IO-bound GNews calls
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        # Submit tasks
         futures = {
             executor.submit(fetch_articles_for_query, stock, start_s, end_s, max_articles_per_stock): stock
             for stock in stock_list
         }
-        # Collect as they complete
         for future in concurrent.futures.as_completed(futures):
             stock = futures[future]
             try:
                 articles = future.result()
                 count = len(articles) if articles else 0
                 results.append({"Stock": stock, "News Count": count, "Articles": articles})
-            except Exception as ex:
+            except Exception:
                 results.append({"Stock": stock, "News Count": 0, "Articles": []})
     return results
 
 # ---------------------------------
-# Tab 1: News (show articles for top N stocks + a search)
+# Tab 1: News
 # ---------------------------------
 with news_tab:
     st.header("🗞️ Latest News — Top Stocks & Search")
@@ -233,13 +220,10 @@ with news_tab:
         show_only_with_news = st.checkbox("Show only stocks with news", value=False)
         top_n_display = st.number_input("Show top N stocks (by news)", min_value=1, max_value=50, value=10)
 
-    # Option: if user used left sidebar add, it is already in session_state
-    # Build list to show: user stocks at top then defaults
     stocks_to_check = st.session_state.fo_stocks.copy()
 
-    # If user used quick search, fetch that specifically and show results
     if search_input.strip() or search_btn:
-        query = search_input.strip() or search_input  # fallback
+        query = search_input.strip() or search_input
         with st.spinner(f"Fetching news for '{query}'..."):
             articles = fetch_articles_for_query(query, start_date_str, end_date_str, max_articles_per_stock)
             if not articles:
@@ -254,7 +238,6 @@ with news_tab:
                     st.markdown(f"**[{title}]({url})** — *{publisher}* • {published}")
                 st.divider()
 
-    # Show top N stocks with news
     with st.spinner("Fetching counts for tracked stocks..."):
         counts_list = fetch_counts_parallel(stocks_to_check[:50], start_date_str, end_date_str, max_articles_per_stock, workers=parallel_workers)
 
@@ -265,7 +248,6 @@ with news_tab:
     st.subheader(f"Top {top_n_display} tracked stocks by news count ({time_period})")
     st.dataframe(df_counts[["Stock", "News Count"]].head(top_n_display).reset_index(drop=True))
 
-    # Expandable: show articles for a selected stock
     st.subheader("Expand a stock to view fetched articles")
     for idx, row in df_counts.head(top_n_display).iterrows():
         stock = row["Stock"]
@@ -286,12 +268,11 @@ with news_tab:
                     st.markdown("---")
 
 # ---------------------------------
-# Tab 2: Trending Stocks (bar chart)
+# Tab 2: Trending Stocks
 # ---------------------------------
 with trending_tab:
     st.header("🔥 Trending Stocks Based on News Coverage")
 
-    # Use counts_list computed earlier if present; else compute fresh
     with st.spinner("Computing trending stocks..."):
         counts_list = fetch_counts_parallel(st.session_state.fo_stocks[:50], start_date_str, end_date_str, max_articles_per_stock, workers=parallel_workers)
 
@@ -300,10 +281,7 @@ with trending_tab:
     if trending_df.empty:
         st.warning("No news data available for the selected stocks / date range.")
     else:
-        # Plotly bar chart
         import plotly.express as px
-
-        # Keep top 30 for plotting
         plot_df = trending_df.head(30).copy()
         fig = px.bar(
             plot_df,
@@ -323,27 +301,26 @@ with trending_tab:
     )
 
 # ---------------------------------
-# Tab 3: Sentiment analysis (real)
+# Tab 3: Sentiment analysis
 # ---------------------------------
 with sentiment_tab:
     st.header("💬 Sentiment Analysis (Real)")
 
     analyzer_choice = "VADER" if sentiment_model.startswith("VADER") else "TextBlob"
+    if analyzer_choice == "TextBlob" and not TEXTBLOB_AVAILABLE:
+        st.error("TextBlob was selected but it's not available. Falling back to VADER.")
+        analyzer_choice = "VADER"
+
     st.write(f"Using **{analyzer_choice}** for sentiment. (Max {max_articles_per_stock} articles per stock)")
 
-    # Choose which stocks to analyze (top N by news)
     analyze_top_n = st.number_input("Analyze top N stocks by news count", min_value=1, max_value=50, value=10)
     analyze_stocks = trending_df.head(analyze_top_n)["Stock"].tolist() if not trending_df.empty else st.session_state.fo_stocks[:analyze_top_n]
-
     st.write(f"Analyzing: {', '.join(analyze_stocks)}")
 
-    # Gather articles for selected stocks (parallel)
     with st.spinner("Fetching articles for sentiment analysis..."):
         articles_results = fetch_counts_parallel(analyze_stocks, start_date_str, end_date_str, max_articles_per_stock, workers=parallel_workers)
 
-    # Flatten articles and compute sentiment per article
     aggregated = []
-    # We'll also compute per-stock aggregated sentiment (average score)
     for item in articles_results:
         stock = item["Stock"]
         articles = item.get("Articles", []) or []
@@ -355,7 +332,6 @@ with sentiment_tab:
             publisher = art.get("publisher", {}).get("title", "")
             published = art.get("published", "")
             snippet = art.get("description", "") or art.get("summary", "") or ""
-            # Prefer title + snippet for sentiment context
             text_for_sentiment = f"{title}. {snippet}"
             sentiment_res = compute_sentiment_for_text(text_for_sentiment, analyzer_choice)
             emoji = sentiment_emoji(sentiment_res["label"])
@@ -376,12 +352,9 @@ with sentiment_tab:
     if sentiment_df.empty:
         st.warning("No article data to analyze for sentiment.")
     else:
-        # Show per-article sentiment table
         st.subheader("Per-article Sentiment (sample)")
-        # Show a nice interactive table (first 100)
         st.dataframe(sentiment_df[["Stock", "Article Title", "Publisher", "Published", "Sentiment", "Score", "Emoji"]].head(200))
 
-        # Compute aggregated metrics per stock
         agg_stock = sentiment_df.groupby("Stock").agg(
             Articles_Count=pd.NamedAgg(column="Article Title", aggfunc=lambda s: s.count()),
             Positive_Count=pd.NamedAgg(column="Sentiment", aggfunc=lambda s: (s == "Positive").sum()),
@@ -390,7 +363,6 @@ with sentiment_tab:
             Avg_Score=pd.NamedAgg(column="Score", aggfunc="mean"),
         ).reset_index()
 
-        # Add a simple 'Net Sentiment' metric: positive - negative normalized by articles
         def net_sentiment(row):
             if row["Articles_Count"] == 0:
                 return 0.0
@@ -402,10 +374,8 @@ with sentiment_tab:
         st.subheader("Aggregated Sentiment by Stock")
         st.dataframe(agg_stock)
 
-        # Plot aggregated net sentiment
         try:
             import plotly.express as px
-
             fig2 = px.bar(
                 agg_stock,
                 x="Stock",
@@ -418,7 +388,6 @@ with sentiment_tab:
         except Exception:
             st.write("Plotting library not available to show charts.")
 
-        # Download options
         st.download_button(
             label="Download per-article sentiment CSV",
             data=sentiment_df.to_csv(index=False),
