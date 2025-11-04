@@ -248,7 +248,14 @@ with trending_tab:
     with st.spinner("Analyzing trends..."):
         all_results = fetch_all_news(fo_stocks, start_date, today)
 
-    counts = [{"Stock": r["Stock"], "News Count": r["News Count"]} for r in all_results]
+    counts = [
+    {
+        "Stock": r.get("Stock", "Unknown"),
+        "News Count": r.get("News Count", len(r.get("Articles", [])))
+    }
+    for r in all_results
+]
+
     df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False)
 
     fig = px.bar(
