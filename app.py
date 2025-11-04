@@ -12,50 +12,78 @@ import time
 # INITIAL SETUP
 # -----------------------------
 nltk.download('vader_lexicon', quiet=True)
-
 st.set_page_config(page_title="Stock News & Sentiment Dashboard", layout="wide")
 
-# Custom CSS for Professional Design
-st.markdown("""
+# -----------------------------
+# SIDEBAR — DARK MODE SWIPE TOGGLE
+# -----------------------------
+st.sidebar.header("⚙️ Settings")
+
+# Streamlit toggle switch for instant dark/light mode
+dark_mode = st.sidebar.toggle("🌗 Dark Mode", value=True, help="Switch instantly between Dark & Light Mode")
+
+# -----------------------------
+# APPLY DYNAMIC THEMES
+# -----------------------------
+if dark_mode:
+    bg_gradient = "linear-gradient(135deg, #0f2027, #203a43, #2c5364)"
+    text_color = "#EAEAEA"
+    accent_color = "#00E676"
+    plot_theme = "plotly_dark"
+else:
+    bg_gradient = "linear-gradient(135deg, #FFFFFF, #E0E0E0, #F5F5F5)"
+    text_color = "#111111"
+    accent_color = "#0078FF"
+    plot_theme = "plotly_white"
+
+# Custom CSS for instant theme switching
+st.markdown(f"""
     <style>
-        body {
-            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-            color: #E0E0E0;
-        }
-        .stApp {
-            background-color: transparent !important;
-        }
-        h1, h2, h3, h4 {
-            color: #00E676 !important;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 8px;
-        }
-        .stTabs [data-baseweb="tab"] {
+        body {{
+            background: {bg_gradient};
+            color: {text_color};
+            transition: all 0.3s ease-in-out;
+        }}
+        .stApp {{
+            background: {bg_gradient} !important;
+            color: {text_color} !important;
+        }}
+        h1, h2, h3, h4, h5 {{
+            color: {accent_color} !important;
+            transition: color 0.3s ease-in-out;
+        }}
+        .stTabs [data-baseweb="tab"] {{
             background-color: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            color: #E0E0E0;
+            color: {text_color} !important;
+            border-radius: 10px;
             padding: 8px 16px;
-        }
-        .stTabs [data-baseweb="tab"]:hover {
+        }}
+        .stTabs [data-baseweb="tab"]:hover {{
             background-color: rgba(255,255,255,0.15);
-        }
-        .stDownloadButton button {
-            background-color: #00E676 !important;
+        }}
+        .stButton button {{
+            background-color: {accent_color} !important;
             color: black !important;
-            border-radius: 8px;
-        }
-        .stDataFrame {
-            border-radius: 12px;
+            border-radius: 6px;
+        }}
+        .stDataFrame {{
+            border-radius: 10px;
             background-color: rgba(255,255,255,0.05);
-        }
+        }}
+        .block-container {{
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
+# -----------------------------
+# APP TITLE
+# -----------------------------
 st.title("💹 Stock Market News & Sentiment Dashboard")
 
 # -----------------------------
-# AUTO REFRESH (every 10 min)
+# AUTO REFRESH EVERY 10 MIN
 # -----------------------------
 refresh_interval = 600  # 10 minutes
 if "last_refresh" not in st.session_state:
@@ -65,15 +93,13 @@ elif time.time() - st.session_state["last_refresh"] > refresh_interval:
     st.rerun()
 
 # -----------------------------
-# SIDEBAR CONTROLS
+# SIDEBAR FILTERS
 # -----------------------------
-st.sidebar.header("⚙️ Controls")
-
+st.sidebar.header("📅 Filter Options")
 time_period = st.sidebar.selectbox(
-    "Time Period",
+    "Select Time Period",
     ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"]
 )
-
 search_input = st.sidebar.text_input("🔍 Compare Stocks (comma separated)", "").strip()
 
 today = datetime.today()
@@ -107,7 +133,6 @@ for stock in custom_stocks:
 # -----------------------------
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_news(stock, start, end):
-    """Fetch news for a single stock (lightweight)."""
     try:
         gnews = GNews(language='en', country='IN', max_results=10)
         gnews.start_date, gnews.end_date = start, end
@@ -116,24 +141,19 @@ def fetch_news(stock, start, end):
         return []
 
 def fetch_all_news(stocks, start, end):
-    """Fetch all news in parallel threads."""
     results = []
-    with ThreadPoolExecutor(max_workers=12) as executor:
-        future_to_stock = {executor.submit(fetch_news, s, start, end): s for s in stocks}
-        for future in as_completed(future_to_stock):
-            stock = future_to_stock[future]
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_news, s, start, end): s for s in stocks}
+        for f in as_completed(futures):
+            stock = futures[f]
             try:
-                articles = future.result()
-                results.append({
-                    "Stock": stock,
-                    "Articles": articles,
-                    "News Count": len(articles)
-                })
+                articles = f.result()
+                results.append({"Stock": stock, "Articles": articles, "News Count": len(articles)})
             except Exception:
                 results.append({"Stock": stock, "Articles": [], "News Count": 0})
     return results
 
-# Sentiment setup
+# Sentiment Analysis
 analyzer = SentimentIntensityAnalyzer()
 def analyze_sentiment(text):
     score = analyzer.polarity_scores(text)["compound"]
@@ -157,7 +177,7 @@ news_tab, trending_tab, sentiment_tab, compare_tab = st.tabs([
 with news_tab:
     st.header("🗞️ Latest Market News")
 
-    with st.spinner("Fetching latest news..."):
+    with st.spinner("Fetching news..."):
         all_results = fetch_all_news(fo_stocks[:10], start_date, today)
 
     for res in all_results[:5]:
@@ -171,12 +191,12 @@ with news_tab:
                 st.markdown("_No news found._")
 
 # -----------------------------
-# TAB 2 — TRENDING STOCKS (No changes)
+# TAB 2 — TRENDING STOCKS
 # -----------------------------
 with trending_tab:
     st.header("🔥 Trending F&O Stocks by News Mentions")
 
-    with st.spinner("Calculating trending data..."):
+    with st.spinner("Analyzing trends..."):
         all_results = fetch_all_news(fo_stocks, start_date, today)
 
     counts = [{"Stock": r["Stock"], "News Count": r["News Count"]} for r in all_results]
@@ -188,12 +208,8 @@ with trending_tab:
         y="News Count",
         color="News Count",
         color_continuous_scale="Turbo",
-        title=f"Trending F&O Stocks ({time_period})"
-    )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color="#E0E0E0")
+        title=f"Trending F&O Stocks ({time_period})",
+        template=plot_theme
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -271,4 +287,4 @@ with compare_tab:
 # FOOTER
 # -----------------------------
 st.markdown("---")
-st.caption("📊 Data Source: Google News | Built with ❤️ using Streamlit, Plotly & NLTK | Auto-refresh every 10 min")
+st.caption(f"📊 Data Source: Google News | Mode: {'Dark' if dark_mode else 'Light'} | Auto-refresh every 10 min | Built with ❤️ using Streamlit & Plotly")
