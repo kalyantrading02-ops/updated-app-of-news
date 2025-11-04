@@ -544,6 +544,7 @@ if st.button("💾 Save / Watch", key=save_key):
         st.success("Saved to Watchlist")
     else:
         st.info("Already in Watchlist")
+        
                     # End card
                     st.markdown('</div>', unsafe_allow_html=True)
 
