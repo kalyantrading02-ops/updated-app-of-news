@@ -1,5 +1,7 @@
 streamlit
-gnews
 pandas
 plotly
-emoji
+gnews
+nltk
+# Optional (add to enable TextBlob sentiment)
+textblob
