@@ -172,23 +172,62 @@ news_tab, trending_tab, sentiment_tab, compare_tab = st.tabs([
 ])
 
 # -----------------------------
-# TAB 1 — NEWS
+# TAB 1 — NEWS SECTION (Improved)
 # -----------------------------
 with news_tab:
-    st.header("🗞️ Latest Market News")
+    st.header("🗞️ Latest Market News for F&O Stocks")
 
-    with st.spinner("Fetching news..."):
-        all_results = fetch_all_news(fo_stocks[:10], start_date, today)
+    # Function to fetch news (cached for speed)
+    @st.cache_data(ttl=600, show_spinner=False)
+    def fetch_news(stock, start, end):
+        try:
+            gnews = GNews(language='en', country='IN', max_results=10)
+            gnews.start_date, gnews.end_date = start, end
+            return gnews.get_news(stock) or []
+        except Exception:
+            return []
 
-    for res in all_results[:5]:
-        stock = res["Stock"]
-        articles = res["Articles"]
-        with st.expander(f"🔹 {stock} ({len(articles)} articles)"):
+    # Parallel fetching for speed
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def fetch_all_news(stocks, start, end):
+        results = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(fetch_news, s, start, end): s for s in stocks}
+            for future in as_completed(futures):
+                stock = futures[future]
+                try:
+                    articles = future.result()
+                    results.append({"Stock": stock, "Articles": articles})
+                except Exception:
+                    results.append({"Stock": stock, "Articles": []})
+        return results
+
+    # Fetch top 10 stocks
+    with st.spinner("Fetching the latest financial news..."):
+        news_results = fetch_all_news(fo_stocks[:10], start_date, today)
+
+    # Display results cleanly
+    for result in news_results:
+        stock = result["Stock"]
+        articles = result["Articles"]
+        with st.expander(f"🔹 {stock} ({len(articles)} Articles)", expanded=False):
             if articles:
                 for art in articles[:5]:
-                    st.markdown(f"**[{art['title']}]({art['url']})**  — *{art['publisher']['title']}*")
+                    title = art["title"]
+                    url = art["url"]
+                    publisher = art["publisher"]["title"] if "publisher" in art and art["publisher"] else "Unknown Source"
+                    published_date = art.get("published date", "N/A")
+                    st.markdown(
+                        f"""
+                        **[{title}]({url})**  
+                        🏢 *{publisher}* | 🗓️ *{published_date}*
+                        """
+                    )
+                    st.markdown("---")
             else:
-                st.markdown("_No news found._")
+                st.info("No news found for this stock in the selected time period.")
 
 # -----------------------------
 # TAB 2 — TRENDING STOCKS
