@@ -3,6 +3,7 @@ import time
 import re
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 
 import streamlit as st
 import pandas as pd
@@ -10,6 +11,8 @@ import plotly.express as px
 from gnews import GNews
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import requests  # NEW: used for Finnhub calendar fetch
+from typing import List, Dict, Any, Optional
 
 # -----------------------------
 # INITIAL SETUP
@@ -19,7 +22,75 @@ st.set_page_config(page_title="Stock News & Sentiment Dashboard", layout="wide")
 analyzer = SentimentIntensityAnalyzer()
 
 # -----------------------------
-# SIDEBAR — DARK MODE TOGGLE (kept as original)
+# FINNHUB: Upcoming Events Fetcher (NEW FEATURE)
+# -----------------------------
+# This is non-intrusive: used only in the Upcoming Events tab if user provides a key.
+def _iso_date(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d")
+
+def fetch_finnhub_economic_calendar(api_key: str, start: datetime, end: datetime, country: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Fetch economic calendar from Finnhub between start and end (inclusive).
+    Returns normalized list with keys: date (datetime or None), title, country, impact, raw.
+    """
+    events = []
+    if not api_key:
+        return events
+    url = "https://finnhub.io/api/v1/calendar/economic"
+    params = {
+        "from": _iso_date(start),
+        "to": _iso_date(end),
+        "token": api_key
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json() or {}
+    except Exception as e:
+        # return empty and show error to user at UI time
+        return [{"error": str(e)}]
+
+    # Finnhub returns a dict that may contain 'economic'
+    raw_events = []
+    if isinstance(data, dict):
+        if "economic" in data and isinstance(data["economic"], list):
+            raw_events = data["economic"]
+        else:
+            # some responses might be list-like
+            for v in data.values():
+                if isinstance(v, list):
+                    raw_events = v
+                    break
+    elif isinstance(data, list):
+        raw_events = data
+
+    for ev in raw_events:
+        # attempt to read multiple possible keys
+        date_raw = ev.get("date") or ev.get("eventDate") or ev.get("time") or ev.get("datetime")
+        event_date = None
+        try:
+            if date_raw:
+                event_date = pd.to_datetime(date_raw).to_pydatetime()
+        except Exception:
+            event_date = None
+        title = ev.get("title") or ev.get("event") or ev.get("name") or ev.get("description") or ""
+        country_ev = (ev.get("country") or ev.get("countryCode") or "").upper()
+        impact = ev.get("impact") or ev.get("importance") or ""
+        events.append({
+            "date": event_date,
+            "title": title,
+            "country": country_ev,
+            "impact": impact,
+            "raw": ev
+        })
+    if country:
+        country_up = country.strip().upper()
+        events = [e for e in events if not e.get("country") or e.get("country").startswith(country_up)]
+    events.sort(key=lambda x: (x["date"] or datetime.max))
+    return events
+
+# -----------------------------
+# ORIGINAL APP: SIDEBAR — DARK MODE TOGGLE (kept)
 # -----------------------------
 st.sidebar.header("⚙️ Settings")
 try:
@@ -28,7 +99,7 @@ except Exception:
     dark_mode = st.sidebar.checkbox("🌗 Dark Mode", value=True, help="Switch instantly between Dark & Light Mode")
 
 # -----------------------------
-# APPLY THEMES (CSS)
+# APPLY THEMES (CSS) (unchanged)
 # -----------------------------
 if dark_mode:
     bg_gradient = "linear-gradient(135deg, #0f2027, #203a43, #2c5364)"
@@ -69,12 +140,12 @@ h1, h2, h3, h4, h5 {{ color: {accent_color} !important; }}
 )
 
 # -----------------------------
-# APP TITLE
+# APP TITLE (unchanged)
 # -----------------------------
 st.title("💹 Stock Market News & Sentiment Dashboard")
 
 # -----------------------------
-# AUTO REFRESH EVERY 10 MIN (robust)
+# AUTO REFRESH EVERY 10 MIN (robust) (unchanged)
 # -----------------------------
 refresh_interval = 600  # 10 minutes
 if "last_refresh" not in st.session_state:
@@ -92,7 +163,7 @@ else:
                 st.stop()
 
 # -----------------------------
-# SIDEBAR FILTERS
+# SIDEBAR FILTERS (unchanged)
 # -----------------------------
 st.sidebar.header("📅 Filter Options")
 time_period = st.sidebar.selectbox("Select Time Period", ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"])
@@ -134,7 +205,7 @@ fo_stocks = [
 ]
 
 # -----------------------------
-# FETCHERS (cached)
+# FETCHERS (cached) (unchanged)
 # -----------------------------
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_news(stock, start, end, max_results=12):
@@ -165,7 +236,7 @@ def fetch_all_news(stocks, start, end):
 
 
 # -----------------------------
-# SENTIMENT helper
+# SENTIMENT helper (unchanged)
 # -----------------------------
 def analyze_sentiment(text):
     if not text:
@@ -180,7 +251,7 @@ def analyze_sentiment(text):
 
 
 # -----------------------------
-# SCORING ENGINE CONFIG
+# SCORING ENGINE CONFIG (unchanged)
 # -----------------------------
 WEIGHTS = {
     "earnings_guidance": 30,
@@ -317,14 +388,13 @@ def score_article(title, desc, publisher, corroboration_sources=None):
 
 
 # -----------------------------
-# Ensure watchlist & manual events exist in session
+# Ensure watchlist & manual events exist in session (unchanged)
 # -----------------------------
 st.session_state.setdefault("saved_articles", [])
 st.session_state.setdefault("manual_events", [])
 
 # -----------------------------
-# FETCH RAW NEWS & PREPARE NEWS_RESULTS & HEADLINE MAP
-# (moved outside of the News tab so Upcoming Events can use same data)
+# FETCH RAW NEWS & PREPARE NEWS_RESULTS & HEADLINE MAP (unchanged)
 # -----------------------------
 with st.spinner("Fetching latest financial news..."):
     raw_news_results = fetch_all_news(fo_stocks[:10], start_date, today)
@@ -371,7 +441,7 @@ for res in news_results:
         headline_map.setdefault(key, []).append(pub_name or "unknown")
 
 # -----------------------------
-# Extract upcoming events from news (same logic as original)
+# Extract upcoming events from news (unchanged)
 # -----------------------------
 EVENT_WINDOW_DAYS = 90
 EVENT_KEYWORDS = {
@@ -504,13 +574,12 @@ for me in manual:
 events = sorted(events, key=lambda x: (x["date"] if isinstance(x["date"], datetime) else datetime.max))
 
 # -----------------------------
-# MAIN TABS (created before use)
-# Now include the 4th tab for Upcoming Events (moved out of News)
+# MAIN TABS (unchanged)
 # -----------------------------
 news_tab, trending_tab, sentiment_tab, events_tab = st.tabs(["📰 News", "🔥 Trending Stocks", "💬 Sentiment", "📅 Upcoming Events"])
 
 # -----------------------------
-# TAB 1 — NEWS (filtered news, WITHOUT Upcoming Events panel)
+# TAB 1 — NEWS (unchanged)
 # -----------------------------
 with news_tab:
     st.header("🗞️ Latest Market News for F&O Stocks")
@@ -653,10 +722,62 @@ with sentiment_tab:
             st.warning("No sentiment data found for the selected timeframe.")
 
 # -----------------------------
-# TAB 4 — UPCOMING EVENTS (moved here; logic unchanged)
+# TAB 4 — UPCOMING EVENTS (ENHANCED: NEW FINNHUB + existing extracted events)
 # -----------------------------
 with events_tab:
-    st.subheader(f"📅 Upcoming Market-Moving Events (next {EVENT_WINDOW_DAYS} days) — {len(events)} found")
+    st.subheader(f"📅 Upcoming Market-Moving Events (next {EVENT_WINDOW_DAYS} days) — {len(events)} found (from news)")
+    # ---- FINNHUB UI: show calendar events if key provided ----
+    st.markdown("**Optional:** Fetch official economic events from Finnhub (macro calendar). Provide FINNHUB API key in secrets or paste below.")
+    # Try to locate in streamlit secrets first (recommended)
+    default_key_hint = ""
+    api_key_from_secrets = None
+    try:
+        api_key_from_secrets = st.secrets.get("FINNHUB")
+    except Exception:
+        api_key_from_secrets = None
+
+    col_key_1, col_key_2 = st.columns([3, 2])
+    with col_key_1:
+        finnhub_key_input = st.text_input("Finnhub API Key (leave empty to skip)", value=default_key_hint, type="password", placeholder="Paste FINNHUB key OR leave empty")
+    with col_key_2:
+        country_filter = st.text_input("Country code filter (optional, e.g., IN or US)", value="")
+
+    # Use secrets if no input provided and secret exists
+    finnhub_key = finnhub_key_input.strip() or api_key_from_secrets
+
+    # If key is present, fetch calendar
+    finnhub_events = []
+    if finnhub_key:
+        with st.spinner("Fetching Finnhub economic calendar (next 90 days)..."):
+            try:
+                finnhub_events = fetch_finnhub_economic_calendar(finnhub_key, datetime.utcnow(), datetime.utcnow() + timedelta(days=EVENT_WINDOW_DAYS), country=country_filter or None)
+                # handle error object returned as dict with error key
+                if finnhub_events and isinstance(finnhub_events[0], dict) and "error" in finnhub_events[0]:
+                    st.error(f"Finnhub fetch error: {finnhub_events[0].get('error')}")
+                    finnhub_events = []
+            except Exception as e:
+                st.error(f"Finnhub fetch failed: {e}")
+                finnhub_events = []
+    else:
+        st.info("No Finnhub key provided — skipping official calendar fetch. To enable, set st.secrets['FINNHUB'] or paste your key above.")
+
+    # Display Finnhub events if any
+    if finnhub_events:
+        st.markdown("### Official economic calendar (Finnhub)")
+        rows = []
+        for ev in finnhub_events:
+            rows.append({
+                "When": ev["date"].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get("date"), datetime) else "N/A",
+                "Country": ev.get("country") or "",
+                "Impact": ev.get("impact") or "",
+                "Event": ev.get("title") or ""
+            })
+        df_finn = pd.DataFrame(rows)
+        st.dataframe(df_finn, use_container_width=True)
+        st.download_button("📥 Download Finnhub Events (CSV)", df_finn.to_csv(index=False).encode("utf-8"), "finnhub_events.csv", "text/csv")
+
+    # ---- Show original extracted events from news (your previous feature) ----
+    st.markdown("### Events extracted from news headlines (company / corporate events)")
     if events:
         rows = []
         for e in events:
@@ -670,11 +791,14 @@ with events_tab:
             })
         df_events = pd.DataFrame(rows)
         st.dataframe(df_events, use_container_width=True)
+        st.download_button("📥 Download Extracted Events (CSV)", df_events.to_csv(index=False).encode("utf-8"), "extracted_events.csv", "text/csv")
         for e in events[:10]:
             date_str = e["date"].strftime("%Y-%m-%d") if isinstance(e["date"], datetime) else str(e["date"])
             st.markdown(f"- **{e['stock']}** — *{e['type'].title()}* on **{date_str}** — *{e['priority']}* — [{e['source']}]({e['url']})")
     else:
         st.info("No upcoming company updates found from recent news. Add manually if needed.")
+
+    # Manual add (unchanged)
     with st.expander("➕ Add manual event"):
         m_stock = st.text_input("Stock name / company")
         m_type = st.selectbox("Event type", ["Earnings/Results", "Board Meeting", "Ex-dividend / Record Date", "AGM/EGM", "Buyback", "IPO/Listing", "Other"])
@@ -693,7 +817,7 @@ with events_tab:
             st.success("Manual event added (session only). It will appear in Upcoming Events on next refresh.")
 
 # -----------------------------
-# FOOTER
+# FOOTER (unchanged)
 # -----------------------------
 st.markdown("---")
 st.caption(f"📊 Data Source: Google News | Mode: {'Dark' if dark_mode else 'Light'} | Auto-refresh every 10 min | Built with ❤️ using Streamlit & Plotly")
