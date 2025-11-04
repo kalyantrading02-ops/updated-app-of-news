@@ -12,11 +12,52 @@ import time
 # INITIAL SETUP
 # -----------------------------
 nltk.download('vader_lexicon', quiet=True)
-st.set_page_config(page_title="Stock News & Sentiment Dashboard", layout="wide")
-st.title("📰 Stock Market News Dashboard")
 
-# Auto-refresh every 10 minutes
-refresh_interval = 600  # seconds
+st.set_page_config(page_title="Stock News & Sentiment Dashboard", layout="wide")
+
+# Custom CSS for Professional Design
+st.markdown("""
+    <style>
+        body {
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+            color: #E0E0E0;
+        }
+        .stApp {
+            background-color: transparent !important;
+        }
+        h1, h2, h3, h4 {
+            color: #00E676 !important;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 8px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            background-color: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            color: #E0E0E0;
+            padding: 8px 16px;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            background-color: rgba(255,255,255,0.15);
+        }
+        .stDownloadButton button {
+            background-color: #00E676 !important;
+            color: black !important;
+            border-radius: 8px;
+        }
+        .stDataFrame {
+            border-radius: 12px;
+            background-color: rgba(255,255,255,0.05);
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("💹 Stock Market News & Sentiment Dashboard")
+
+# -----------------------------
+# AUTO REFRESH (every 10 min)
+# -----------------------------
+refresh_interval = 600  # 10 minutes
 if "last_refresh" not in st.session_state:
     st.session_state["last_refresh"] = time.time()
 elif time.time() - st.session_state["last_refresh"] > refresh_interval:
@@ -26,10 +67,10 @@ elif time.time() - st.session_state["last_refresh"] > refresh_interval:
 # -----------------------------
 # SIDEBAR CONTROLS
 # -----------------------------
-st.sidebar.header("Filter Options")
+st.sidebar.header("⚙️ Controls")
 
 time_period = st.sidebar.selectbox(
-    "Select Time Period",
+    "Time Period",
     ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"]
 )
 
@@ -56,26 +97,28 @@ fo_stocks = [
     "Tech Mahindra", "Sun Pharma"
 ]
 
-# Add custom user stocks
 custom_stocks = [s.strip() for s in search_input.split(",") if s.strip()]
 for stock in custom_stocks:
     if stock not in fo_stocks:
         fo_stocks.insert(0, stock)
 
 # -----------------------------
-# CACHED FUNCTIONS
+# PERFORMANCE BOOSTERS
 # -----------------------------
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_news(stock, start, end):
+    """Fetch news for a single stock (lightweight)."""
     try:
-        gnews = GNews(language='en', country='IN', start_date=start, end_date=end)
+        gnews = GNews(language='en', country='IN', max_results=10)
+        gnews.start_date, gnews.end_date = start, end
         return gnews.get_news(stock) or []
     except Exception:
         return []
 
 def fetch_all_news(stocks, start, end):
+    """Fetch all news in parallel threads."""
     results = []
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=12) as executor:
         future_to_stock = {executor.submit(fetch_news, s, start, end): s for s in stocks}
         for future in as_completed(future_to_stock):
             stock = future_to_stock[future]
@@ -90,11 +133,8 @@ def fetch_all_news(stocks, start, end):
                 results.append({"Stock": stock, "Articles": [], "News Count": 0})
     return results
 
-# -----------------------------
-# SENTIMENT ANALYSIS
-# -----------------------------
+# Sentiment setup
 analyzer = SentimentIntensityAnalyzer()
-
 def analyze_sentiment(text):
     score = analyzer.polarity_scores(text)["compound"]
     if score > 0.2:
@@ -117,26 +157,26 @@ news_tab, trending_tab, sentiment_tab, compare_tab = st.tabs([
 with news_tab:
     st.header("🗞️ Latest Market News")
 
-    with st.spinner("Fetching news for F&O stocks..."):
+    with st.spinner("Fetching latest news..."):
         all_results = fetch_all_news(fo_stocks[:10], start_date, today)
 
     for res in all_results[:5]:
         stock = res["Stock"]
         articles = res["Articles"]
-        st.subheader(f"🔹 {stock}")
-        if articles:
-            for art in articles[:5]:
-                st.markdown(f"**[{art['title']}]({art['url']})** — *{art['publisher']['title']}*")
-        else:
-            st.warning(f"No news found for {stock}.")
+        with st.expander(f"🔹 {stock} ({len(articles)} articles)"):
+            if articles:
+                for art in articles[:5]:
+                    st.markdown(f"**[{art['title']}]({art['url']})**  — *{art['publisher']['title']}*")
+            else:
+                st.markdown("_No news found._")
 
 # -----------------------------
-# TAB 2 — TRENDING STOCKS (Unchanged)
+# TAB 2 — TRENDING STOCKS (No changes)
 # -----------------------------
 with trending_tab:
-    st.header("🔥 Trending Stocks by News Count")
+    st.header("🔥 Trending F&O Stocks by News Mentions")
 
-    with st.spinner("Calculating trending stocks..."):
+    with st.spinner("Calculating trending data..."):
         all_results = fetch_all_news(fo_stocks, start_date, today)
 
     counts = [{"Stock": r["Stock"], "News Count": r["News Count"]} for r in all_results]
@@ -148,7 +188,12 @@ with trending_tab:
         y="News Count",
         color="News Count",
         color_continuous_scale="Turbo",
-        title=f"Trending Stocks ({time_period})"
+        title=f"Trending F&O Stocks ({time_period})"
+    )
+    fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color="#E0E0E0")
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -156,9 +201,9 @@ with trending_tab:
 # TAB 3 — SENTIMENT
 # -----------------------------
 with sentiment_tab:
-    st.header("💬 Sentiment Analysis from News Headlines")
+    st.header("💬 Sentiment Analysis")
 
-    with st.spinner("Analyzing sentiment for F&O stocks..."):
+    with st.spinner("Analyzing sentiment..."):
         sentiment_data = []
         all_results = fetch_all_news(fo_stocks[:10], start_date, today)
         for res in all_results:
@@ -174,9 +219,7 @@ with sentiment_tab:
 
     if sentiment_data:
         sentiment_df = pd.DataFrame(sentiment_data)
-        st.dataframe(sentiment_df)
-
-        # Download Option
+        st.dataframe(sentiment_df, use_container_width=True)
         st.download_button(
             "📥 Download Sentiment Data",
             sentiment_df.to_csv(index=False).encode("utf-8"),
@@ -184,16 +227,16 @@ with sentiment_tab:
             "text/csv"
         )
     else:
-        st.warning("No sentiment data available.")
+        st.warning("No sentiment data found.")
 
 # -----------------------------
 # TAB 4 — COMPARE STOCKS
 # -----------------------------
 with compare_tab:
-    st.header("📊 Compare Selected Stocks")
+    st.header("📊 Compare Stock Sentiment")
 
     if custom_stocks:
-        with st.spinner("Fetching comparison data..."):
+        with st.spinner("Comparing..."):
             compare_results = fetch_all_news(custom_stocks, start_date, today)
             compare_data = []
             for res in compare_results:
@@ -214,9 +257,7 @@ with compare_tab:
                 })
 
             compare_df = pd.DataFrame(compare_data)
-            st.dataframe(compare_df)
-
-            # Download comparison
+            st.dataframe(compare_df, use_container_width=True)
             st.download_button(
                 "📥 Download Comparison Data",
                 compare_df.to_csv(index=False).encode("utf-8"),
@@ -224,10 +265,10 @@ with compare_tab:
                 "text/csv"
             )
     else:
-        st.info("💡 Enter 2–3 stock names in the sidebar to compare sentiment.")
+        st.info("💡 Enter 2–3 stock names in sidebar to compare sentiment.")
 
 # -----------------------------
 # FOOTER
 # -----------------------------
 st.markdown("---")
-st.caption("📊 Data from Google News | Built with ❤️ using Streamlit, Plotly & NLTK VADER | Auto-refreshes every 10 minutes")
+st.caption("📊 Data Source: Google News | Built with ❤️ using Streamlit, Plotly & NLTK | Auto-refresh every 10 min")
