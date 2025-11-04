@@ -90,14 +90,30 @@ h1, h2, h3, h4, h5 {{
 st.title("💹 Stock Market News & Sentiment Dashboard")
 
 # -----------------------------
-# AUTO REFRESH EVERY 10 MIN
+# AUTO REFRESH EVERY 10 MIN (robust)
 # -----------------------------
-refresh_interval = 600
+refresh_interval = 600  # 10 minutes
+
 if "last_refresh" not in st.session_state:
     st.session_state["last_refresh"] = time.time()
-elif time.time() - st.session_state["last_refresh"] > refresh_interval:
-    st.session_state["last_refresh"] = time.time()
-    st.experimental_rerun()
+else:
+    if time.time() - st.session_state["last_refresh"] > refresh_interval:
+        st.session_state["last_refresh"] = time.time()
+        # Try rerun APIs safely
+        try:
+            # Preferred for many recent Streamlit builds
+            st.experimental_rerun()
+        except Exception:
+            try:
+                # Works on some older builds
+                st.rerun()
+            except Exception:
+                # Graceful fallback
+                st.warning(
+                    "Auto-refresh isn’t available in this Streamlit version. "
+                    "Please refresh the page manually to update data."
+                )
+                st.stop()
 
 # -----------------------------
 # SIDEBAR FILTERS
