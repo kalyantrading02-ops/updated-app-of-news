@@ -140,17 +140,27 @@ def fetch_news(stock, start, end):
     except Exception:
         return []
 
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_all_news(stocks, start, end):
     results = []
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(fetch_news, s, start, end): s for s in stocks}
-        for f in as_completed(futures):
-            stock = futures[f]
+        for future in as_completed(futures):
+            stock = futures[future]
             try:
-                articles = f.result()
-                results.append({"Stock": stock, "Articles": articles, "News Count": len(articles)})
+                articles = future.result()
+                # ✅ Include News Count to avoid KeyError
+                results.append({
+                    "Stock": stock,
+                    "Articles": articles,
+                    "News Count": len(articles)
+                })
             except Exception:
-                results.append({"Stock": stock, "Articles": [], "News Count": 0})
+                results.append({
+                    "Stock": stock,
+                    "Articles": [],
+                    "News Count": 0
+                })
     return results
 
 # Sentiment Analysis
