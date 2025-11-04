@@ -603,6 +603,7 @@ with news_tab:
 
         filtered_out_total += (len(scored_list) - len(visible))
         displayed_total += len(visible)
+
 with st.expander(f"🔹 {stock} ({len(visible)} Articles shown, scanned {len(scored_list)})", expanded=False):
            # iterate with index so we can build a unique key per article per-stock
 for idx, art in enumerate(visible[:10]):
