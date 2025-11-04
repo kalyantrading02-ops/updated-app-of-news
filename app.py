@@ -526,24 +526,24 @@ with news_tab:
                     # Why this matters tooltip / short explanation (join reasons)
                     why = "This article is flagged because: " + (", ".join(art["reasons"]) if art["reasons"] else "multiple signals detected")
                     st.markdown(f'<div style="margin-top:8px;"><small title="{why}">ℹ️ Why this matters</small></div>', unsafe_allow_html=True)
-                    # Save/watchlist button
-                    save_key = f"save_{hash(art['title'] + art['url'])}"
-                    if save_key not in st.session_state:
-                        st.session_state[save_key] = False
-                    if st.button("💾 Save / Watch", key=save_key):
-                        # add article to saved list if not present
-                        found = next((x for x in st.session_state["saved_articles"] if x["url"] == art["url"]), None)
-                        if not found:
-                            st.session_state["saved_articles"].append({
-                                "title": art["title"],
-                                "url": art["url"],
-                                "stock": art["stock"],
-                                "date": art["date"],
-                                "score": art["score"]
-                            })
-                            st.success("Saved to Watchlist")
-                        else:
-                            st.info("Already in Watchlist")
+                    
+                    # --- Save / Watch button (fixed) ---
+save_key = f"save_{abs(hash(art['title'] + art['url']))}"
+
+# Directly create the button; don't pre-assign this key in session_state
+if st.button("💾 Save / Watch", key=save_key):
+    found = next((x for x in st.session_state["saved_articles"] if x["url"] == art["url"]), None)
+    if not found:
+        st.session_state["saved_articles"].append({
+            "title": art["title"],
+            "url": art["url"],
+            "stock": art["stock"],
+            "date": art["date"],
+            "score": art["score"]
+        })
+        st.success("Saved to Watchlist")
+    else:
+        st.info("Already in Watchlist")
                     # End card
                     st.markdown('</div>', unsafe_allow_html=True)
 
