@@ -605,8 +605,7 @@ with news_tab:
         displayed_total += len(visible)
 
         with st.expander(f"🔹 {stock} ({len(visible)} Articles shown, scanned {len(scored_list)})", expanded=False):
-           
-            # iterate with index so we can build a unique key per article per-stock
+           # iterate with index so we can build a unique key per article per-stock
 for idx, art in enumerate(visible[:10]):
     title = art["title"]
     url = art["url"]
