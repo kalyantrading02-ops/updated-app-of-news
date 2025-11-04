@@ -87,9 +87,7 @@ time_period = st.sidebar.selectbox(
     ["Last Week", "Last Month", "Last 3 Months", "Last 6 Months"]
 )
 
-search_input = st.sidebar.text_input("🔍 Compare Stocks (comma separated)", "").strip()
 today = datetime.today()
-
 if time_period == "Last Week":
     start_date = today - timedelta(days=7)
 elif time_period == "Last Month":
@@ -108,11 +106,6 @@ fo_stocks = [
     "NTPC", "ITC", "Adani Enterprises", "Coal India", "Power Grid", "Maruti Suzuki",
     "Tech Mahindra", "Sun Pharma"
 ]
-
-custom_stocks = [s.strip() for s in search_input.split(",") if s.strip()]
-for stock in custom_stocks:
-    if stock not in fo_stocks:
-        fo_stocks.insert(0, stock)
 
 # -----------------------------
 # PERFORMANCE BOOSTERS
