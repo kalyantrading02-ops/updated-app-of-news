@@ -210,7 +210,7 @@ fo_stocks = [
 # FETCHERS (cached) (unchanged)
 # -----------------------------
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_news(stock, start, end, max_results=12):
+def fetch_news(stock, start, end, max_results=50):
     try:
         gnews = GNews(language="en", country="IN", max_results=max_results)
         try:
