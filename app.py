@@ -688,12 +688,11 @@ with news_tab:
         st.info("No saved articles yet — click 💾 Save / Watch on any article card.")
 
 # -----------------------------
-# TAB 2 — TRENDING (live percentage chart with labels above bars)
+# TAB 2 — TRENDING (robust percent / fallback to counts)
 # -----------------------------
 with trending_tab:
-    st.header("🔥 Trending F&O Stocks by News Mentions (Live %)")
+    st.header("🔥 Trending F&O Stocks by News Mentions (Live)")
     with st.spinner("Analyzing latest news data..."):
-        # Fetch fresh news data dynamically
         all_results = fetch_all_news(fo_stocks, start_date, today)
         counts = [
             {"Stock": r["Stock"], "News Count": int(r.get("News Count", len(r.get("Articles", []))))}
@@ -704,68 +703,70 @@ with trending_tab:
     if df_counts.empty:
         st.info("No trending data available right now. Try changing time period.")
     else:
-        # Calculate live relative percentages (top stock = 100%)
-        top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
-        df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
-        df_counts["Percent_Label"] = df_counts["Percent"].round(1).astype(str) + "%"
+        # If all counts are identical (or there's only 1 item), showing "100%" for all is misleading.
+        unique_counts = df_counts["News Count"].unique()
+        use_percent = True
+        if len(unique_counts) == 1:
+            # fallback: show actual counts instead of percent
+            use_percent = False
 
-        # Modern vivid color palette
+        if use_percent:
+            # Relative to top stock (top = 100%)
+            top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
+            df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
+            df_counts["Label"] = df_counts["Percent"].round(1).astype(str) + "%"
+            y_field = "Percent"
+            hover_template_extra = "%{y:.1f}%"
+            yaxis_title = "Relative Popularity (%)"
+        else:
+            # Fallback to raw counts for clarity
+            df_counts["Label"] = df_counts["News Count"].astype(str)
+            y_field = "News Count"
+            hover_template_extra = "%{y}"
+            yaxis_title = "News Mentions (count)"
+
+        # Colors (vivid palette)
         palette = ["#0078FF", "#00C853", "#EF5350", "#9C27B0", "#FF9800", "#00BCD4", "#8BC34A", "#9E9E9E"]
         colors = [palette[i % len(palette)] for i in range(len(df_counts))]
 
-        # Build professional Plotly bar chart
+        # Build chart
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=df_counts["Stock"],
-            y=df_counts["Percent"],
-            marker=dict(
-                color=colors,
-                line=dict(color='rgba(0,0,0,0.4)', width=1.5),
-            ),
-            text=df_counts["Percent_Label"],        # show % above each bar
+            y=df_counts[y_field],
+            marker=dict(color=colors, line=dict(color='rgba(0,0,0,0.4)', width=1.5)),
+            text=df_counts["Label"],
             textposition='outside',
-            hovertemplate='<b>%{x}</b><br>News Mentions: %{y:.1f}%<extra></extra>',
+            hovertemplate='<b>%{x}</b><br>Value: ' + hover_template_extra + '<extra></extra>',
         ))
 
-        # Elegant layout styling
+        # Layout
         fig.update_layout(
             template=plot_theme,
-            title=dict(text=f"Trending F&O Stocks ({time_period})", x=0.5, xanchor='center', font=dict(size=20, family="Arial")),
+            title=dict(text=f"Trending F&O Stocks ({time_period})", x=0.5, xanchor='center', font=dict(size=20)),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             margin=dict(t=70, l=60, r=40, b=120),
             height=520,
         )
 
-        # Axis customization
-        fig.update_xaxes(
-            tickangle=-35,
-            tickfont=dict(size=11),
-            showgrid=False,
-            zeroline=False,
-        )
-        fig.update_yaxes(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.08)',
-            tickfont=dict(size=12),
-            title_text="Relative Popularity (%)",
-            rangemode="tozero",
-        )
+        fig.update_xaxes(tickangle=-35, tickfont=dict(size=11), showgrid=False, zeroline=False)
+        fig.update_yaxes(showgrid=True, gridcolor='rgba(255,255,255,0.08)', tickfont=dict(size=12), title_text=yaxis_title, rangemode="tozero")
 
-        # Bar labels appearance
         fig.update_traces(textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"), cliponaxis=False)
 
-        # Match theme for dark/light mode
         if dark_mode:
             fig.update_layout(font=dict(color="#EAEAEA"))
         else:
             fig.update_layout(font=dict(color="#111111"))
 
-        # Render chart
         st.plotly_chart(fig, use_container_width=True)
 
-        # Info below chart for clarity
-        st.caption("📊 Percentages are live — calculated relative to the most-mentioned stock in real-time.")
+        # Explanation / legend
+        if use_percent:
+            st.caption("📊 Percentages are relative to the most-mentioned stock (top = 100%).")
+        else:
+            st.caption("📊 All stocks have identical news counts — showing raw counts for clarity.")
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
