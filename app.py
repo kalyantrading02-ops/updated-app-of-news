@@ -823,20 +823,18 @@ with trending_tab:
 
         st.subheader("📊 Market-impacting News Summary")
 
-# Prepare dataframe with optional Percent column
 df_display = df_counts[["Stock", "News Count"]].copy()
 if y_field == "Percent":
     df_display["Percent"] = df_counts["Percent"].round(1)
 
-# Center-align numeric columns (News Count & Percent)
-df_styled = (
-    df_display.style
-    .set_properties(**{"text-align": "center"})
-    .hide(axis="index")
+# ✅ Center only the numeric columns (News Count and Percent)
+st.dataframe(
+    df_display.style.set_properties(
+        subset=["News Count"] + (["Percent"] if "Percent" in df_display.columns else []),
+        **{"text-align": "center"}
+    ),
+    use_container_width=True
 )
-
-# Display the styled dataframe
-st.dataframe(df_styled, use_container_width=True)
 
         # Top trending list (market-impacting only)
         top_nonzero = df_counts[df_counts["News Count"] > 0].head(3)
