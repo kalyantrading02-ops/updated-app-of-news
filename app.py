@@ -4,6 +4,8 @@ import re
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import plotly.graph_objects as go
+
 
 import streamlit as st
 import pandas as pd
@@ -686,48 +688,81 @@ with news_tab:
         st.info("No saved articles yet — click 💾 Save / Watch on any article card.")
 
 # -----------------------------
-# TAB 2 — TRENDING (improved single-color chart)
+# TAB 2 — TRENDING (styled like example image)
 # -----------------------------
 with trending_tab:
     st.header("🔥 Trending F&O Stocks by News Mentions")
-    with st.spinner("Analyzing trends..."):
+    with st.spinner("Preparing stylish trending chart..."):
         all_results = fetch_all_news(fo_stocks, start_date, today)
         counts = [
-            {"Stock": r["Stock"], "News Count": r.get("News Count", len(r.get("Articles", [])))}
+            {"Stock": r["Stock"], "News Count": int(r.get("News Count", len(r.get("Articles", []))))}
             for r in all_results
         ]
-        df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False)
+        df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False).reset_index(drop=True)
 
-        # Single-color professional bar chart
-        bar_color = "#00C853" if dark_mode else "#0078FF"  # green for dark mode, blue for light mode
+    # If no data, show info
+    if df_counts.empty:
+        st.info("No trending data available for the selected period.")
+    else:
+        # Choose a vivid palette (one color per bar, similar to your image)
+        palette = ["#0078FF", "#00C853", "#EF5350", "#9C27B0", "#FF9800", "#00BCD4", "#8BC34A", "#9E9E9E"]
+        # repeat palette if fewer/more items
+        colors = [palette[i % len(palette)] for i in range(len(df_counts))]
 
-        fig = px.bar(
-            df_counts,
-            x="Stock",
-            y="News Count",
-            title=f"Trending F&O Stocks ({time_period})",
-            template=plot_theme,
-        )
+        # Build a Plotly figure using go.Bar for precise styling
+        fig = go.Figure()
 
-        # Apply one solid bar color and adjust bar thickness
-        fig.update_traces(
-            marker_color=bar_color,
-            width=0.6,  # increases bar width
-        )
+        fig.add_trace(go.Bar(
+            x=df_counts["Stock"],
+            y=df_counts["News Count"],
+            marker=dict(
+                color=colors,
+                line=dict(color='rgba(0,0,0,0.45)', width=2),  # subtle border like in image
+            ),
+            text=[f"{v}%" if v >= 0 else str(v) for v in df_counts["News Count"]],  # top labels
+            textposition='outside',
+            hovertemplate='%{x}<br>News Mentions: %{y}<extra></extra>',
+        ))
 
-        # Improve visibility of bars and labels
+        # Layout styled to match the dark, high-contrast look in your image
         fig.update_layout(
-            margin=dict(t=50, l=40, r=40, b=40),
-            showlegend=False,
-            xaxis_title="Stock",
-            yaxis_title="News Mentions",
-            height=500,  # taller chart for better readability
-            bargap=0.25,  # space between bars
+            template=plot_theme,
+            title=dict(text=f"Trending F&O Stocks ({time_period})", x=0.5, xanchor='center', font=dict(size=20, family="Arial")),
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            margin=dict(t=70, l=60, r=40, b=120),
+            height=520,
         )
 
-        # Ensure Y-axis starts from zero for clear scaling
-        fig.update_yaxes(rangemode="tozero")
+        # Axis styling & tick rotation like the example
+        fig.update_xaxes(
+            tickangle=-35,
+            tickfont=dict(size=11),
+            showgrid=False,
+            zeroline=False,
+        )
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor='rgba(255,255,255,0.06)',
+            tickfont=dict(size=12),
+            title_text="News Mentions",
+            rangemode="tozero",
+        )
 
+        # Make bar labels bolder and ensure they sit above bars with small offset
+        fig.update_traces(textfont=dict(size=12, color="#ffffff"), cliponaxis=False)
+
+        # If in dark_mode, ensure text colors are bright; otherwise darker
+        if dark_mode:
+            fig.update_layout(
+                font=dict(color="#EAEAEA"),
+            )
+        else:
+            fig.update_layout(
+                font=dict(color="#111111"),
+            )
+
+        # Render chart
         st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
