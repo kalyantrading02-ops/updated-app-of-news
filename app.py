@@ -688,11 +688,12 @@ with news_tab:
         st.info("No saved articles yet — click 💾 Save / Watch on any article card.")
 
 # -----------------------------
-# TAB 2 — TRENDING (styled like example image)
+# TAB 2 — TRENDING (live percentage chart with labels above bars)
 # -----------------------------
 with trending_tab:
-    st.header("🔥 Trending F&O Stocks by News Mentions")
-    with st.spinner("Preparing stylish trending chart..."):
+    st.header("🔥 Trending F&O Stocks by News Mentions (Live %)")
+    with st.spinner("Analyzing latest news data..."):
+        # Fetch fresh news data dynamically
         all_results = fetch_all_news(fo_stocks, start_date, today)
         counts = [
             {"Stock": r["Stock"], "News Count": int(r.get("News Count", len(r.get("Articles", []))))}
@@ -700,31 +701,33 @@ with trending_tab:
         ]
         df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False).reset_index(drop=True)
 
-    # If no data, show info
     if df_counts.empty:
-        st.info("No trending data available for the selected period.")
+        st.info("No trending data available right now. Try changing time period.")
     else:
-        # Choose a vivid palette (one color per bar, similar to your image)
+        # Calculate live relative percentages (top stock = 100%)
+        top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
+        df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
+        df_counts["Percent_Label"] = df_counts["Percent"].round(1).astype(str) + "%"
+
+        # Modern vivid color palette
         palette = ["#0078FF", "#00C853", "#EF5350", "#9C27B0", "#FF9800", "#00BCD4", "#8BC34A", "#9E9E9E"]
-        # repeat palette if fewer/more items
         colors = [palette[i % len(palette)] for i in range(len(df_counts))]
 
-        # Build a Plotly figure using go.Bar for precise styling
+        # Build professional Plotly bar chart
         fig = go.Figure()
-
         fig.add_trace(go.Bar(
             x=df_counts["Stock"],
-            y=df_counts["News Count"],
+            y=df_counts["Percent"],
             marker=dict(
                 color=colors,
-                line=dict(color='rgba(0,0,0,0.45)', width=2),  # subtle border like in image
+                line=dict(color='rgba(0,0,0,0.4)', width=1.5),
             ),
-            text=[f"{v}%" if v >= 0 else str(v) for v in df_counts["News Count"]],  # top labels
+            text=df_counts["Percent_Label"],        # show % above each bar
             textposition='outside',
-            hovertemplate='%{x}<br>News Mentions: %{y}<extra></extra>',
+            hovertemplate='<b>%{x}</b><br>News Mentions: %{y:.1f}%<extra></extra>',
         ))
 
-        # Layout styled to match the dark, high-contrast look in your image
+        # Elegant layout styling
         fig.update_layout(
             template=plot_theme,
             title=dict(text=f"Trending F&O Stocks ({time_period})", x=0.5, xanchor='center', font=dict(size=20, family="Arial")),
@@ -734,7 +737,7 @@ with trending_tab:
             height=520,
         )
 
-        # Axis styling & tick rotation like the example
+        # Axis customization
         fig.update_xaxes(
             tickangle=-35,
             tickfont=dict(size=11),
@@ -743,27 +746,26 @@ with trending_tab:
         )
         fig.update_yaxes(
             showgrid=True,
-            gridcolor='rgba(255,255,255,0.06)',
+            gridcolor='rgba(255,255,255,0.08)',
             tickfont=dict(size=12),
-            title_text="News Mentions",
+            title_text="Relative Popularity (%)",
             rangemode="tozero",
         )
 
-        # Make bar labels bolder and ensure they sit above bars with small offset
-        fig.update_traces(textfont=dict(size=12, color="#ffffff"), cliponaxis=False)
+        # Bar labels appearance
+        fig.update_traces(textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"), cliponaxis=False)
 
-        # If in dark_mode, ensure text colors are bright; otherwise darker
+        # Match theme for dark/light mode
         if dark_mode:
-            fig.update_layout(
-                font=dict(color="#EAEAEA"),
-            )
+            fig.update_layout(font=dict(color="#EAEAEA"))
         else:
-            fig.update_layout(
-                font=dict(color="#111111"),
-            )
+            fig.update_layout(font=dict(color="#111111"))
 
         # Render chart
         st.plotly_chart(fig, use_container_width=True)
+
+        # Info below chart for clarity
+        st.caption("📊 Percentages are live — calculated relative to the most-mentioned stock in real-time.")
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
