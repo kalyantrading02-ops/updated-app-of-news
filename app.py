@@ -703,18 +703,17 @@ with trending_tab:
     if df_counts.empty:
         st.info("No trending data available right now. Try changing time period.")
     else:
-        # If all counts are identical (or there's only 1 item), showing "100%" for all is misleading.
+        # Detect if all counts are identical (avoid 100% everywhere)
         unique_counts = df_counts["News Count"].unique()
         use_percent = True
         if len(unique_counts) == 1:
-            # fallback: show actual counts instead of percent
-            use_percent = False
+            use_percent = False  # fallback to raw counts
 
         if use_percent:
             # Relative to top stock (top = 100%)
             top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
-            df_counts["Percent"] = df_counts["News Count"]
-df_counts["Percent_Label"] = df_counts["News Count"].astype(str)
+            df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
+            df_counts["Label"] = df_counts["Percent"].round(1).astype(str) + "%"
             y_field = "Percent"
             hover_template_extra = "%{y:.1f}%"
             yaxis_title = "Relative Popularity (%)"
@@ -734,7 +733,10 @@ df_counts["Percent_Label"] = df_counts["News Count"].astype(str)
         fig.add_trace(go.Bar(
             x=df_counts["Stock"],
             y=df_counts[y_field],
-            marker=dict(color=colors, line=dict(color='rgba(0,0,0,0.4)', width=1.5)),
+            marker=dict(
+                color=colors,
+                line=dict(color='rgba(0,0,0,0.4)', width=1.5)
+            ),
             text=df_counts["Label"],
             textposition='outside',
             hovertemplate='<b>%{x}</b><br>Value: ' + hover_template_extra + '<extra></extra>',
@@ -750,10 +752,25 @@ df_counts["Percent_Label"] = df_counts["News Count"].astype(str)
             height=520,
         )
 
-        fig.update_xaxes(tickangle=-35, tickfont=dict(size=11), showgrid=False, zeroline=False)
-        fig.update_yaxes(showgrid=True, gridcolor='rgba(255,255,255,0.08)', tickfont=dict(size=12), title_text=yaxis_title, rangemode="tozero")
+        fig.update_xaxes(
+            tickangle=-35,
+            tickfont=dict(size=11),
+            showgrid=False,
+            zeroline=False
+        )
 
-        fig.update_traces(textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"), cliponaxis=False)
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor='rgba(255,255,255,0.08)',
+            tickfont=dict(size=12),
+            title_text=yaxis_title,
+            rangemode="tozero"
+        )
+
+        fig.update_traces(
+            textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"),
+            cliponaxis=False
+        )
 
         if dark_mode:
             fig.update_layout(font=dict(color="#EAEAEA"))
@@ -762,7 +779,7 @@ df_counts["Percent_Label"] = df_counts["News Count"].astype(str)
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # Explanation / legend
+        # Info note below chart
         if use_percent:
             st.caption("📊 Percentages are relative to the most-mentioned stock (top = 100%).")
         else:
