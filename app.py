@@ -694,8 +694,29 @@ with trending_tab:
         all_results = fetch_all_news(fo_stocks, start_date, today)
         counts = [{"Stock": r["Stock"], "News Count": r.get("News Count", len(r.get("Articles", [])))} for r in all_results]
         df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False)
-        fig = px.bar(df_counts, x="Stock", y="News Count", color="News Count", color_continuous_scale="Turbo", title=f"Trending F&O Stocks ({time_period})", template=plot_theme)
-        st.plotly_chart(fig, use_container_width=True)
+        # Single-color professional bar chart for Trending F&O Stocks
+bar_color = "#00C853" if dark_mode else "#0078FF"  # green for dark mode, blue for light mode
+
+fig = px.bar(
+    df_counts,
+    x="Stock",
+    y="News Count",
+    title=f"Trending F&O Stocks ({time_period})",
+    template=plot_theme,
+)
+
+# Apply one solid bar color
+fig.update_traces(marker_color=bar_color)
+
+# Clean and balanced layout
+fig.update_layout(
+    margin=dict(t=50, l=20, r=20, b=20),
+    showlegend=False,
+    xaxis_title="Stock",
+    yaxis_title="News Mentions",
+)
+
+st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
