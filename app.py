@@ -721,91 +721,97 @@ with news_tab:
         st.info("No saved articles yet — click 💾 Save / Watch on any article card.")
 
 # -----------------------------
-# TAB 2 — TRENDING (accurate live counts; zeros allowed)
+# TAB 2 — TRENDING (Shows which stocks are trending in news as per selected timeframe)
 # -----------------------------
 with trending_tab:
-    st.header("🔥 Trending F&O Stocks by News Mentions (Live & Accurate)")
-    with st.spinner("Fetching live news counts and preparing chart..."):
-        # fetch news lists (honest lists, may be empty)
+    st.header(f"🔥 Trending F&O Stocks by News Mentions — {time_period}")
+
+    with st.spinner("Fetching latest news data..."):
+        # Fetch all news for the given timeframe (real counts, not capped)
         all_results = fetch_all_news(fo_stocks, start_date, today)
 
-        # Build counts: use length of returned (deduped) article list; if fetch failed, list may be []
+        # Build dataframe with stock and count of unique articles
         counts = []
         for r in all_results:
             stock_name = r.get("Stock", "")
             articles = r.get("Articles") or []
-            # If fetch_all_news returns News Count, prefer real len(articles)
-            count = len(articles)
-            counts.append({"Stock": stock_name, "News Count": int(count)})
+            counts.append({
+                "Stock": stock_name,
+                "News Count": len(articles)
+            })
 
         df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False).reset_index(drop=True)
 
-    # If no data at all, show message
     if df_counts.empty:
-        st.info("No trending data available for the selected period.")
+        st.info("No data available — try a longer time period.")
     else:
-        # If all counts are zero, show zeros (no percent math)
-        if df_counts["News Count"].sum() == 0:
-            # All stocks have zero news in this timeframe
-            df_counts["Label"] = df_counts["News Count"].astype(str)
-            y_field = "News Count"
-            hover_template_extra = "%{y}"
-            yaxis_title = "News Mentions (count)"
-        else:
-            # Compute percentage relative to top stock (top = 100%)
-            top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
-            df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
-            # Show integer percent above bars (you can use .round(1) for decimal)
-            df_counts["Label"] = df_counts["Percent"].round(0).astype(int).astype(str) + "%"
-            y_field = "Percent"
-            hover_template_extra = "%{y:.1f}%"
-            yaxis_title = "Relative Popularity (%) (top = 100%)"
+        # Compute % relative to top trending stock
+        top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
+        df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
+        df_counts["Label"] = df_counts["Percent"].round(1).astype(str) + "%"
 
-        # Color palette (or single color if you prefer)
+        # Colors for bars (you can change if you prefer one color)
         palette = ["#0078FF", "#00C853", "#EF5350", "#9C27B0", "#FF9800", "#00BCD4", "#8BC34A", "#9E9E9E"]
         colors = [palette[i % len(palette)] for i in range(len(df_counts))]
 
-        # Build chart (Plotly go for precise styling)
+        # Build trending chart
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=df_counts["Stock"],
-            y=df_counts[y_field],
+            y=df_counts["Percent"],
             marker=dict(color=colors, line=dict(color='rgba(0,0,0,0.4)', width=1.25)),
             text=df_counts["Label"],
             textposition='outside',
-            hovertemplate='<b>%{x}</b><br>Value: ' + hover_template_extra + '<extra></extra>',
+            hovertemplate='<b>%{x}</b><br>News Mentions: %{y:.1f}%<extra></extra>',
         ))
 
-        # Layout
+        # Style and layout
         fig.update_layout(
             template=plot_theme,
-            title=dict(text=f"Trending F&O Stocks ({time_period})", x=0.5, xanchor='center', font=dict(size=20)),
+            title=dict(text="Which Stocks Are Trending in the News", x=0.5, font=dict(size=20)),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             margin=dict(t=70, l=60, r=40, b=120),
             height=520,
         )
 
-        # Axis styling and rotation
-        fig.update_xaxes(tickangle=-35, tickfont=dict(size=11), showgrid=False, zeroline=False)
-        fig.update_yaxes(showgrid=True, gridcolor='rgba(255,255,255,0.08)', tickfont=dict(size=12), title_text=yaxis_title, rangemode="tozero")
+        fig.update_xaxes(
+            tickangle=-35,
+            tickfont=dict(size=11),
+            showgrid=False,
+            zeroline=False
+        )
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor='rgba(255,255,255,0.08)',
+            tickfont=dict(size=12),
+            title_text="Relative Popularity (%)",
+            rangemode="tozero"
+        )
 
-        # Label color for legibility in dark/light modes
-        fig.update_traces(textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"), cliponaxis=False)
+        fig.update_traces(
+            textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"),
+            cliponaxis=False
+        )
 
         if dark_mode:
             fig.update_layout(font=dict(color="#EAEAEA"))
         else:
             fig.update_layout(font=dict(color="#111111"))
 
-        # Render chart, use container width
+        # Display chart
         st.plotly_chart(fig, use_container_width=True)
 
-        # Informative caption
-        if df_counts["News Count"].sum() == 0:
-            st.caption("📊 All tracked stocks have zero news in the selected timeframe.")
-        else:
-            st.caption("📊 Percentages are computed relative to the most-mentioned stock (top = 100%). Stocks with no news will show 0.")
+        # Add table below chart showing real counts and percentages
+        st.subheader("📊 Stock News Mentions Summary")
+        df_display = df_counts[["Stock", "News Count", "Percent"]]
+        st.dataframe(df_display, use_container_width=True)
+
+        # Add text summary of top trending stocks
+        top_stocks = df_counts.head(3)
+        top_list = ", ".join(top_stocks["Stock"])
+        st.success(f"🚀 Top Trending Stocks as per news volume: **{top_list}**")
+        st.caption("Percentages are relative to the most-mentioned stock (top = 100%). Stocks with no news show 0%.")
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
