@@ -713,8 +713,8 @@ with trending_tab:
         if use_percent:
             # Relative to top stock (top = 100%)
             top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
-            df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
-            df_counts["Label"] = df_counts["Percent"].round(1).astype(str) + "%"
+            df_counts["Percent"] = df_counts["News Count"]
+df_counts["Percent_Label"] = df_counts["News Count"].astype(str)
             y_field = "Percent"
             hover_template_extra = "%{y:.1f}%"
             yaxis_title = "Relative Popularity (%)"
