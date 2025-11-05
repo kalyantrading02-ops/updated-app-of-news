@@ -836,13 +836,17 @@ st.dataframe(
     use_container_width=True
 )
 
-        # Top trending list (market-impacting only)
-        top_nonzero = df_counts[df_counts["News Count"] > 0].head(3)
-        if not top_nonzero.empty:
-            st.success(f"🚀 Top Trending (market-impacting): {', '.join(top_nonzero['Stock'].tolist())}")
-            st.caption(f"Showing articles with score ≥ {impact_threshold}. Adjust `impact_threshold` in the code to tune sensitivity.")
-        else:
-            st.info("No market-impacting news found in the selected timeframe (all counts are 0).")
+# 🟢 Top trending stocks (market-impacting only)
+top_nonzero = df_counts[df_counts["News Count"] > 0].head(3)
+if not top_nonzero.empty:
+    st.success(
+        f"🚀 Top Trending (market-impacting): {', '.join(top_nonzero['Stock'].tolist())}"
+    )
+    st.caption(
+        f"Showing articles with score ≥ {impact_threshold}. Adjust `impact_threshold` in the code to tune sensitivity."
+    )
+else:
+    st.info("No market-impacting news found in the selected timeframe (all counts are 0).")
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
