@@ -721,97 +721,119 @@ with news_tab:
         st.info("No saved articles yet — click 💾 Save / Watch on any article card.")
 
 # -----------------------------
-# TAB 2 — TRENDING (Shows which stocks are trending in news as per selected timeframe)
+# TAB 2 — TRENDING (market-impacting news only)
 # -----------------------------
 with trending_tab:
-    st.header(f"🔥 Trending F&O Stocks by News Mentions — {time_period}")
+    st.header(f"🔥 Trending F&O Stocks by Market-Impacting News — {time_period}")
 
-    with st.spinner("Fetching latest news data..."):
-        # Fetch all news for the given timeframe (real counts, not capped)
+    # Choose threshold for "market-impacting" — change this number if you want stricter/looser filtering
+    impact_threshold = 40
+
+    with st.spinner("Fetching latest news and filtering for market-impacting items..."):
+        # fetch raw news lists (deduped by fetch_news function)
         all_results = fetch_all_news(fo_stocks, start_date, today)
 
-        # Build dataframe with stock and count of unique articles
+        # Build counts by counting only articles with score >= impact_threshold
         counts = []
-        for r in all_results:
-            stock_name = r.get("Stock", "")
-            articles = r.get("Articles") or []
-            counts.append({
-                "Stock": stock_name,
-                "News Count": len(articles)
-            })
+        for res in all_results:
+            stock_name = res.get("Stock", "")
+            articles = res.get("Articles") or []
+            impactful_count = 0
+            for art in articles:
+                # prepare title/desc/publisher similar to News tab logic
+                title = art.get("title") or ""
+                desc = art.get("description") or art.get("snippet") or ""
+                pub_field = art.get("publisher")
+                if isinstance(pub_field, dict):
+                    publisher = pub_field.get("title") or ""
+                elif isinstance(pub_field, str):
+                    publisher = pub_field
+                else:
+                    publisher = art.get("source") or ""
+
+                # build headline key for corroboration lookup (reuse your headline_map)
+                norm_head = re.sub(r'\W+', " ", (title or "").lower()).strip()
+                key = norm_head[:120] if norm_head else f"{stock_name.lower()}_{(title or '')[:40]}"
+                publishers_for_head = headline_map.get(key, [])
+
+                # score article using your scoring engine; count if above threshold
+                score, reasons = score_article(title, desc, publisher, corroboration_sources=publishers_for_head)
+                if score >= impact_threshold:
+                    impactful_count += 1
+
+            counts.append({"Stock": stock_name, "News Count": int(impactful_count)})
 
         df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False).reset_index(drop=True)
 
+    # If no data, show message
     if df_counts.empty:
-        st.info("No data available — try a longer time period.")
+        st.info("No data available — try changing the time period or increasing max_results in fetcher.")
     else:
-        # Compute % relative to top trending stock
-        top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
-        df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
-        df_counts["Label"] = df_counts["Percent"].round(1).astype(str) + "%"
+        # If everything is zero, show raw zeros; otherwise compute relative percent (top = 100%)
+        if df_counts["News Count"].sum() == 0:
+            df_counts["Label"] = df_counts["News Count"].astype(str)
+            y_field = "News Count"
+            hover_template_extra = "%{y}"
+            yaxis_title = "Market-impacting News Mentions (count)"
+        else:
+            top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
+            df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
+            df_counts["Label"] = df_counts["Percent"].round(1).astype(str) + "%"
+            y_field = "Percent"
+            hover_template_extra = "%{y:.1f}%"
+            yaxis_title = "Relative Popularity (%) (top = 100%)"
 
-        # Colors for bars (you can change if you prefer one color)
+        # Palette (one color per bar); change to single color by replacing colors list if desired
         palette = ["#0078FF", "#00C853", "#EF5350", "#9C27B0", "#FF9800", "#00BCD4", "#8BC34A", "#9E9E9E"]
         colors = [palette[i % len(palette)] for i in range(len(df_counts))]
 
-        # Build trending chart
+        # Build Plotly bar chart
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=df_counts["Stock"],
-            y=df_counts["Percent"],
+            y=df_counts[y_field],
             marker=dict(color=colors, line=dict(color='rgba(0,0,0,0.4)', width=1.25)),
             text=df_counts["Label"],
             textposition='outside',
-            hovertemplate='<b>%{x}</b><br>News Mentions: %{y:.1f}%<extra></extra>',
+            hovertemplate='<b>%{x}</b><br>Value: ' + hover_template_extra + '<extra></extra>',
         ))
 
-        # Style and layout
+        # Layout & style
         fig.update_layout(
             template=plot_theme,
-            title=dict(text="Which Stocks Are Trending in the News", x=0.5, font=dict(size=20)),
+            title=dict(text=f"Trending F&O Stocks (market-impacting news only) — {time_period}", x=0.5, xanchor='center', font=dict(size=18)),
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             margin=dict(t=70, l=60, r=40, b=120),
             height=520,
         )
 
-        fig.update_xaxes(
-            tickangle=-35,
-            tickfont=dict(size=11),
-            showgrid=False,
-            zeroline=False
-        )
-        fig.update_yaxes(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.08)',
-            tickfont=dict(size=12),
-            title_text="Relative Popularity (%)",
-            rangemode="tozero"
-        )
+        fig.update_xaxes(tickangle=-35, tickfont=dict(size=11), showgrid=False, zeroline=False)
+        fig.update_yaxes(showgrid=True, gridcolor='rgba(255,255,255,0.08)', tickfont=dict(size=12), title_text=yaxis_title, rangemode="tozero")
 
-        fig.update_traces(
-            textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"),
-            cliponaxis=False
-        )
+        fig.update_traces(textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"), cliponaxis=False)
 
         if dark_mode:
             fig.update_layout(font=dict(color="#EAEAEA"))
         else:
             fig.update_layout(font=dict(color="#111111"))
 
-        # Display chart
+        # Render chart and table
         st.plotly_chart(fig, use_container_width=True)
 
-        # Add table below chart showing real counts and percentages
-        st.subheader("📊 Stock News Mentions Summary")
-        df_display = df_counts[["Stock", "News Count", "Percent"]]
+        st.subheader("📊 Market-impacting News Summary")
+        df_display = df_counts[["Stock", "News Count"]]
+        if y_field == "Percent":
+            df_display["Percent"] = df_counts["Percent"].round(1)
         st.dataframe(df_display, use_container_width=True)
 
-        # Add text summary of top trending stocks
-        top_stocks = df_counts.head(3)
-        top_list = ", ".join(top_stocks["Stock"])
-        st.success(f"🚀 Top Trending Stocks as per news volume: **{top_list}**")
-        st.caption("Percentages are relative to the most-mentioned stock (top = 100%). Stocks with no news show 0%.")
+        # Top trending list (market-impacting only)
+        top_nonzero = df_counts[df_counts["News Count"] > 0].head(3)
+        if not top_nonzero.empty:
+            st.success(f"🚀 Top Trending (market-impacting): {', '.join(top_nonzero['Stock'].tolist())}")
+            st.caption(f"Showing articles with score ≥ {impact_threshold}. Adjust `impact_threshold` in the code to tune sensitivity.")
+        else:
+            st.info("No market-impacting news found in the selected timeframe (all counts are 0).")
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
