@@ -209,18 +209,51 @@ fo_stocks = [
 # -----------------------------
 # FETCHERS (cached) (unchanged)
 # -----------------------------
-@st.cache_data(ttl=600, show_spinner=False)
+# -----------------------------
+# REPLACE existing fetch_news() with this improved live fetcher
+# - Removes the tiny artificial cap
+# - Deduplicates headlines (by normalized title) so counts reflect unique articles
+# - Returns [] when no articles found so stocks can show 0
+# -----------------------------
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_news(stock, start, end, max_results=50):
+    """
+    Fetch news for `stock` using GNews.
+    - Default max_results increased to 50 to allow real variation.
+    - Deduplicates articles based on normalized title to avoid duplicates.
+    - Returns a list of article dicts (may be empty).
+    """
     try:
         gnews = GNews(language="en", country="IN", max_results=max_results)
         try:
             gnews.start_date, gnews.end_date = start, end
         except Exception:
             pass
-        return gnews.get_news(stock) or []
-    except Exception:
-        return []
 
+        raw = gnews.get_news(stock) or []
+        if not raw:
+            return []
+
+        # Normalize and dedupe by headline/title to avoid duplicate hits
+        seen = set()
+        unique_articles = []
+        for art in raw:
+            title = (art.get("title") or "").strip()
+            # normalized key - remove non-word and lowercase
+            norm = re.sub(r'\W+', " ", title.lower()).strip()
+            if not norm:
+                key = json.dumps(art, sort_keys=True)[:120]
+            else:
+                key = norm[:200]
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_articles.append(art)
+
+        return unique_articles
+    except Exception:
+        # On any fetch error, return empty list so the UI shows 0 count
+        return []
 
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_all_news(stocks, start, end):
