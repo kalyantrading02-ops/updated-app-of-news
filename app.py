@@ -686,37 +686,49 @@ with news_tab:
         st.info("No saved articles yet — click 💾 Save / Watch on any article card.")
 
 # -----------------------------
-# TAB 2 — TRENDING (unchanged)
+# TAB 2 — TRENDING (improved single-color chart)
 # -----------------------------
 with trending_tab:
     st.header("🔥 Trending F&O Stocks by News Mentions")
     with st.spinner("Analyzing trends..."):
         all_results = fetch_all_news(fo_stocks, start_date, today)
-        counts = [{"Stock": r["Stock"], "News Count": r.get("News Count", len(r.get("Articles", [])))} for r in all_results]
+        counts = [
+            {"Stock": r["Stock"], "News Count": r.get("News Count", len(r.get("Articles", [])))}
+            for r in all_results
+        ]
         df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False)
-        # Single-color professional bar chart for Trending F&O Stocks
-bar_color = "#00C853" if dark_mode else "#0078FF"  # green for dark mode, blue for light mode
 
-fig = px.bar(
-    df_counts,
-    x="Stock",
-    y="News Count",
-    title=f"Trending F&O Stocks ({time_period})",
-    template=plot_theme,
-)
+        # Single-color professional bar chart
+        bar_color = "#00C853" if dark_mode else "#0078FF"  # green for dark mode, blue for light mode
 
-# Apply one solid bar color
-fig.update_traces(marker_color=bar_color)
+        fig = px.bar(
+            df_counts,
+            x="Stock",
+            y="News Count",
+            title=f"Trending F&O Stocks ({time_period})",
+            template=plot_theme,
+        )
 
-# Clean and balanced layout
-fig.update_layout(
-    margin=dict(t=50, l=20, r=20, b=20),
-    showlegend=False,
-    xaxis_title="Stock",
-    yaxis_title="News Mentions",
-)
+        # Apply one solid bar color and adjust bar thickness
+        fig.update_traces(
+            marker_color=bar_color,
+            width=0.6,  # increases bar width
+        )
 
-st.plotly_chart(fig, use_container_width=True)
+        # Improve visibility of bars and labels
+        fig.update_layout(
+            margin=dict(t=50, l=40, r=40, b=40),
+            showlegend=False,
+            xaxis_title="Stock",
+            yaxis_title="News Mentions",
+            height=500,  # taller chart for better readability
+            bargap=0.25,  # space between bars
+        )
+
+        # Ensure Y-axis starts from zero for clear scaling
+        fig.update_yaxes(rangemode="tozero")
+
+        st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
