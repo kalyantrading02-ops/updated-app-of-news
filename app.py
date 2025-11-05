@@ -688,55 +688,56 @@ with news_tab:
         st.info("No saved articles yet — click 💾 Save / Watch on any article card.")
 
 # -----------------------------
-# TAB 2 — TRENDING (robust percent / fallback to counts)
+# TAB 2 — TRENDING (accurate live counts; zeros allowed)
 # -----------------------------
 with trending_tab:
-    st.header("🔥 Trending F&O Stocks by News Mentions (Live)")
-    with st.spinner("Analyzing latest news data..."):
+    st.header("🔥 Trending F&O Stocks by News Mentions (Live & Accurate)")
+    with st.spinner("Fetching live news counts and preparing chart..."):
+        # fetch news lists (honest lists, may be empty)
         all_results = fetch_all_news(fo_stocks, start_date, today)
-        counts = [
-            {"Stock": r["Stock"], "News Count": int(r.get("News Count", len(r.get("Articles", []))))}
-            for r in all_results
-        ]
+
+        # Build counts: use length of returned (deduped) article list; if fetch failed, list may be []
+        counts = []
+        for r in all_results:
+            stock_name = r.get("Stock", "")
+            articles = r.get("Articles") or []
+            # If fetch_all_news returns News Count, prefer real len(articles)
+            count = len(articles)
+            counts.append({"Stock": stock_name, "News Count": int(count)})
+
         df_counts = pd.DataFrame(counts).sort_values("News Count", ascending=False).reset_index(drop=True)
 
+    # If no data at all, show message
     if df_counts.empty:
-        st.info("No trending data available right now. Try changing time period.")
+        st.info("No trending data available for the selected period.")
     else:
-        # Detect if all counts are identical (avoid 100% everywhere)
-        unique_counts = df_counts["News Count"].unique()
-        use_percent = True
-        if len(unique_counts) == 1:
-            use_percent = False  # fallback to raw counts
-
-        if use_percent:
-            # Relative to top stock (top = 100%)
-            top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
-            df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
-            df_counts["Label"] = df_counts["Percent"].round(1).astype(str) + "%"
-            y_field = "Percent"
-            hover_template_extra = "%{y:.1f}%"
-            yaxis_title = "Relative Popularity (%)"
-        else:
-            # Fallback to raw counts for clarity
+        # If all counts are zero, show zeros (no percent math)
+        if df_counts["News Count"].sum() == 0:
+            # All stocks have zero news in this timeframe
             df_counts["Label"] = df_counts["News Count"].astype(str)
             y_field = "News Count"
             hover_template_extra = "%{y}"
             yaxis_title = "News Mentions (count)"
+        else:
+            # Compute percentage relative to top stock (top = 100%)
+            top_value = df_counts["News Count"].max() if df_counts["News Count"].max() > 0 else 1
+            df_counts["Percent"] = (df_counts["News Count"] / top_value) * 100
+            # Show integer percent above bars (you can use .round(1) for decimal)
+            df_counts["Label"] = df_counts["Percent"].round(0).astype(int).astype(str) + "%"
+            y_field = "Percent"
+            hover_template_extra = "%{y:.1f}%"
+            yaxis_title = "Relative Popularity (%) (top = 100%)"
 
-        # Colors (vivid palette)
+        # Color palette (or single color if you prefer)
         palette = ["#0078FF", "#00C853", "#EF5350", "#9C27B0", "#FF9800", "#00BCD4", "#8BC34A", "#9E9E9E"]
         colors = [palette[i % len(palette)] for i in range(len(df_counts))]
 
-        # Build chart
+        # Build chart (Plotly go for precise styling)
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=df_counts["Stock"],
             y=df_counts[y_field],
-            marker=dict(
-                color=colors,
-                line=dict(color='rgba(0,0,0,0.4)', width=1.5)
-            ),
+            marker=dict(color=colors, line=dict(color='rgba(0,0,0,0.4)', width=1.25)),
             text=df_counts["Label"],
             textposition='outside',
             hovertemplate='<b>%{x}</b><br>Value: ' + hover_template_extra + '<extra></extra>',
@@ -752,38 +753,26 @@ with trending_tab:
             height=520,
         )
 
-        fig.update_xaxes(
-            tickangle=-35,
-            tickfont=dict(size=11),
-            showgrid=False,
-            zeroline=False
-        )
+        # Axis styling and rotation
+        fig.update_xaxes(tickangle=-35, tickfont=dict(size=11), showgrid=False, zeroline=False)
+        fig.update_yaxes(showgrid=True, gridcolor='rgba(255,255,255,0.08)', tickfont=dict(size=12), title_text=yaxis_title, rangemode="tozero")
 
-        fig.update_yaxes(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.08)',
-            tickfont=dict(size=12),
-            title_text=yaxis_title,
-            rangemode="tozero"
-        )
-
-        fig.update_traces(
-            textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"),
-            cliponaxis=False
-        )
+        # Label color for legibility in dark/light modes
+        fig.update_traces(textfont=dict(size=12, color="#ffffff" if dark_mode else "#111111"), cliponaxis=False)
 
         if dark_mode:
             fig.update_layout(font=dict(color="#EAEAEA"))
         else:
             fig.update_layout(font=dict(color="#111111"))
 
+        # Render chart, use container width
         st.plotly_chart(fig, use_container_width=True)
 
-        # Info note below chart
-        if use_percent:
-            st.caption("📊 Percentages are relative to the most-mentioned stock (top = 100%).")
+        # Informative caption
+        if df_counts["News Count"].sum() == 0:
+            st.caption("📊 All tracked stocks have zero news in the selected timeframe.")
         else:
-            st.caption("📊 All stocks have identical news counts — showing raw counts for clarity.")
+            st.caption("📊 Percentages are computed relative to the most-mentioned stock (top = 100%). Stocks with no news will show 0.")
 
 # -----------------------------
 # TAB 3 — SENTIMENT (unchanged)
