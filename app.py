@@ -877,24 +877,21 @@ with sentiment_tab:
 # -----------------------------
 with events_tab:
     st.subheader(f"📅 Upcoming Market-Moving Events (next {EVENT_WINDOW_DAYS} days) — {len(events)} found (from news)")
-    # ---- FINNHUB UI: show calendar events if key provided ----
-    st.markdown("**Optional:** Fetch official economic events from Finnhub (macro calendar). Provide FINNHUB API key in secrets or paste below.")
-    # Try to locate in streamlit secrets first (recommended)
-    default_key_hint = ""
+    # ---- FINNHUB UI (Simplified: Removed visible API & Country inputs) ----
+st.markdown("**Optional:** Fetch official economic events from Finnhub (macro calendar).**  \
+To enable this feature, set your Finnhub API key in Streamlit Secrets as `st.secrets['FINNHUB']`.  \
+If no key is found, the section will be skipped automatically.")
+
+default_key_hint = ""
+api_key_from_secrets = None
+try:
+    api_key_from_secrets = st.secrets.get("FINNHUB")
+except Exception:
     api_key_from_secrets = None
-    try:
-        api_key_from_secrets = st.secrets.get("FINNHUB")
-    except Exception:
-        api_key_from_secrets = None
 
-    col_key_1, col_key_2 = st.columns([3, 2])
-    with col_key_1:
-        finnhub_key_input = st.text_input("Finnhub API Key (leave empty to skip)", value=default_key_hint, type="password", placeholder="Paste FINNHUB key OR leave empty")
-    with col_key_2:
-        country_filter = st.text_input("Country code filter (optional, e.g., IN or US)", value="")
-
-    # Use secrets if no input provided and secret exists
-    finnhub_key = finnhub_key_input.strip() or api_key_from_secrets
+# ✅ Removed text input fields — use only Streamlit Secrets
+finnhub_key = api_key_from_secrets
+country_filter = ""  # keep empty so rest of the code works unchanged
 
     # If key is present, fetch calendar
     finnhub_events = []
