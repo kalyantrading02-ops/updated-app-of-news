@@ -873,69 +873,12 @@ with sentiment_tab:
             st.warning("No sentiment data found for the selected timeframe.")
 
 # -----------------------------
-# TAB 4 — UPCOMING EVENTS (ENHANCED: NEW FINNHUB + existing extracted events)
+# TAB 4 — UPCOMING EVENTS (Only company/corporate events — Finnhub removed)
 # -----------------------------
 with events_tab:
     st.subheader(f"📅 Upcoming Market-Moving Events (next {EVENT_WINDOW_DAYS} days) — {len(events)} found (from news)")
-    
-    # ---- FINNHUB UI: show calendar events if key provided ----
-    st.markdown("**Optional:** Fetch official economic events from Finnhub (macro calendar). Provide FINNHUB API key in secrets or paste below.")
-    
-    # Try to locate in streamlit secrets first (recommended)
-    default_key_hint = ""
-    api_key_from_secrets = None
-    try:
-        api_key_from_secrets = st.secrets.get("FINNHUB")
-    except Exception:
-        api_key_from_secrets = None
 
-    # ✅ Removed the two input fields (API Key and Country Filter)
-    # It will now use st.secrets["FINNHUB"] automatically if available
-    finnhub_key = api_key_from_secrets
-    country_filter = ""  # keep empty so rest of logic below stays the same
-
-    # If key is present, fetch calendar
-    finnhub_events = []
-    if finnhub_key:
-        with st.spinner("Fetching Finnhub economic calendar (next 90 days)..."):
-            try:
-                finnhub_events = fetch_finnhub_economic_calendar(
-                    finnhub_key,
-                    datetime.utcnow(),
-                    datetime.utcnow() + timedelta(days=EVENT_WINDOW_DAYS),
-                    country=country_filter or None
-                )
-                # handle error object returned as dict with error key
-                if finnhub_events and isinstance(finnhub_events[0], dict) and "error" in finnhub_events[0]:
-                    st.error(f"Finnhub fetch error: {finnhub_events[0].get('error')}")
-                    finnhub_events = []
-            except Exception as e:
-                st.error(f"Finnhub fetch failed: {e}")
-                finnhub_events = []
-    else:
-        st.info("No Finnhub key provided — skipping official calendar fetch. To enable, set st.secrets['FINNHUB'].")
-
-    # Display Finnhub events if any
-    if finnhub_events:
-        st.markdown("### Official economic calendar (Finnhub)")
-        rows = []
-        for ev in finnhub_events:
-            rows.append({
-                "When": ev["date"].strftime("%Y-%m-%d %H:%M") if isinstance(ev.get("date"), datetime) else "N/A",
-                "Country": ev.get("country") or "",
-                "Impact": ev.get("impact") or "",
-                "Event": ev.get("title") or ""
-            })
-        df_finn = pd.DataFrame(rows)
-        st.dataframe(df_finn, use_container_width=True)
-        st.download_button(
-            "📥 Download Finnhub Events (CSV)",
-            df_finn.to_csv(index=False).encode("utf-8"),
-            "finnhub_events.csv",
-            "text/csv"
-        )
-
-    # ---- Show original extracted events from news (your previous feature) ----
+    # ---- Show original extracted events from news (company / corporate events) ----
     st.markdown("### Events extracted from news headlines (company / corporate events)")
     if events:
         rows = []
@@ -962,7 +905,7 @@ with events_tab:
     else:
         st.info("No upcoming company updates found from recent news. Add manually if needed.")
 
-    # Manual add (unchanged)
+    # ---- Manual Add Section (unchanged) ----
     with st.expander("➕ Add manual event"):
         m_stock = st.text_input("Stock name / company")
         m_type = st.selectbox(
