@@ -877,28 +877,34 @@ with sentiment_tab:
 # -----------------------------
 with events_tab:
     st.subheader(f"📅 Upcoming Market-Moving Events (next {EVENT_WINDOW_DAYS} days) — {len(events)} found (from news)")
-    # ---- FINNHUB UI (Simplified: Removed visible API & Country inputs) ----
-st.markdown("**Optional:** Fetch official economic events from Finnhub (macro calendar).**  \
-To enable this feature, set your Finnhub API key in Streamlit Secrets as `st.secrets['FINNHUB']`.  \
-If no key is found, the section will be skipped automatically.")
-
-default_key_hint = ""
-api_key_from_secrets = None
-try:
-    api_key_from_secrets = st.secrets.get("FINNHUB")
-except Exception:
+    
+    # ---- FINNHUB UI: show calendar events if key provided ----
+    st.markdown("**Optional:** Fetch official economic events from Finnhub (macro calendar). Provide FINNHUB API key in secrets or paste below.")
+    
+    # Try to locate in streamlit secrets first (recommended)
+    default_key_hint = ""
     api_key_from_secrets = None
+    try:
+        api_key_from_secrets = st.secrets.get("FINNHUB")
+    except Exception:
+        api_key_from_secrets = None
 
-# ✅ Removed text input fields — use only Streamlit Secrets
-finnhub_key = api_key_from_secrets
-country_filter = ""  # keep empty so rest of the code works unchanged
+    # ✅ Removed the two input fields (API Key and Country Filter)
+    # It will now use st.secrets["FINNHUB"] automatically if available
+    finnhub_key = api_key_from_secrets
+    country_filter = ""  # keep empty so rest of logic below stays the same
 
     # If key is present, fetch calendar
     finnhub_events = []
     if finnhub_key:
         with st.spinner("Fetching Finnhub economic calendar (next 90 days)..."):
             try:
-                finnhub_events = fetch_finnhub_economic_calendar(finnhub_key, datetime.utcnow(), datetime.utcnow() + timedelta(days=EVENT_WINDOW_DAYS), country=country_filter or None)
+                finnhub_events = fetch_finnhub_economic_calendar(
+                    finnhub_key,
+                    datetime.utcnow(),
+                    datetime.utcnow() + timedelta(days=EVENT_WINDOW_DAYS),
+                    country=country_filter or None
+                )
                 # handle error object returned as dict with error key
                 if finnhub_events and isinstance(finnhub_events[0], dict) and "error" in finnhub_events[0]:
                     st.error(f"Finnhub fetch error: {finnhub_events[0].get('error')}")
@@ -907,7 +913,7 @@ country_filter = ""  # keep empty so rest of the code works unchanged
                 st.error(f"Finnhub fetch failed: {e}")
                 finnhub_events = []
     else:
-        st.info("No Finnhub key provided — skipping official calendar fetch. To enable, set st.secrets['FINNHUB'] or paste your key above.")
+        st.info("No Finnhub key provided — skipping official calendar fetch. To enable, set st.secrets['FINNHUB'].")
 
     # Display Finnhub events if any
     if finnhub_events:
@@ -922,7 +928,12 @@ country_filter = ""  # keep empty so rest of the code works unchanged
             })
         df_finn = pd.DataFrame(rows)
         st.dataframe(df_finn, use_container_width=True)
-        st.download_button("📥 Download Finnhub Events (CSV)", df_finn.to_csv(index=False).encode("utf-8"), "finnhub_events.csv", "text/csv")
+        st.download_button(
+            "📥 Download Finnhub Events (CSV)",
+            df_finn.to_csv(index=False).encode("utf-8"),
+            "finnhub_events.csv",
+            "text/csv"
+        )
 
     # ---- Show original extracted events from news (your previous feature) ----
     st.markdown("### Events extracted from news headlines (company / corporate events)")
@@ -939,7 +950,12 @@ country_filter = ""  # keep empty so rest of the code works unchanged
             })
         df_events = pd.DataFrame(rows)
         st.dataframe(df_events, use_container_width=True)
-        st.download_button("📥 Download Extracted Events (CSV)", df_events.to_csv(index=False).encode("utf-8"), "extracted_events.csv", "text/csv")
+        st.download_button(
+            "📥 Download Extracted Events (CSV)",
+            df_events.to_csv(index=False).encode("utf-8"),
+            "extracted_events.csv",
+            "text/csv"
+        )
         for e in events[:10]:
             date_str = e["date"].strftime("%Y-%m-%d") if isinstance(e["date"], datetime) else str(e["date"])
             st.markdown(f"- **{e['stock']}** — *{e['type'].title()}* on **{date_str}** — *{e['priority']}* — [{e['source']}]({e['url']})")
@@ -949,7 +965,10 @@ country_filter = ""  # keep empty so rest of the code works unchanged
     # Manual add (unchanged)
     with st.expander("➕ Add manual event"):
         m_stock = st.text_input("Stock name / company")
-        m_type = st.selectbox("Event type", ["Earnings/Results", "Board Meeting", "Ex-dividend / Record Date", "AGM/EGM", "Buyback", "IPO/Listing", "Other"])
+        m_type = st.selectbox(
+            "Event type",
+            ["Earnings/Results", "Board Meeting", "Ex-dividend / Record Date", "AGM/EGM", "Buyback", "IPO/Listing", "Other"]
+        )
         m_date = st.date_input("Event date", value=datetime.now().date() + timedelta(days=7))
         m_desc = st.text_area("Short description (optional)")
         m_priority = st.selectbox("Priority", ["Normal", "High"])
